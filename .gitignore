@@ -7,3 +7,18 @@ out/
 .DS_Store
 next-env.d.ts
 tsconfig.tsbuildinfo
+
+# AI tool config and instruction files
+CLAUDE.md
+AGENTS.md
+GEMINI.md
+.claude/
+.codex/
+.cursor/
+.cursorrules
+.windsurfrules
+.gemini/
+.aider*
+.continue/
+.omp/
+.github/copilot-instructions.md
