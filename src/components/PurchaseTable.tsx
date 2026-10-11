@@ -4,7 +4,6 @@
 
 import Link from "next/link";
 
-import { auditPurchase, combineSeverity, SEVERITY_LABEL, SEVERITY_TONE } from "@/lib/audit";
 import { aegisText } from "@/lib/format";
 import { PRIORITY_LABEL } from "@/lib/priority-label";
 import type { PurchaseRecord } from "@/lib/types";
@@ -24,40 +23,33 @@ export function PurchaseTable({ records }: { records: PurchaseRecord[] }) {
             <th>처리 상태</th>
             <th>결제 금액</th>
             <th>선택된 모델</th>
-            <th>감사 결과</th>
             <th>결제 모드</th>
           </tr>
         </thead>
         <tbody>
-          {records.map((record) => {
-            const severity = combineSeverity(auditPurchase(record));
-            return (
-              <tr key={record.id}>
-                <td className="requestCell">
-                  <Link href={`/dashboard/${record.id}`} title={record.prompt}>
-                    {record.prompt}
-                  </Link>
-                  <small>
-                    {record.id.slice(0, 8)} · {when(record.createdAt)}
-                  </small>
-                </td>
-                <td>
-                  <span className={`badge ${record.status === "SETTLED" ? "ok" : "risk"}`}>{record.status}</span>
-                </td>
-                <td>
-                  <strong className="amount">{aegisText(record.decision.winner.amountUnits)}</strong>
-                </td>
-                <td>
-                  {record.decision.winner.displayName}
-                  <small>{PRIORITY_LABEL[record.decision.priority]}</small>
-                </td>
-                <td>
-                  <span className={`badge ${SEVERITY_TONE[severity]}`}>{SEVERITY_LABEL[severity]}</span>
-                </td>
-                <td>{record.payment?.mode ?? "-"}</td>
-              </tr>
-            );
-          })}
+          {records.map((record) => (
+            <tr key={record.id}>
+              <td className="requestCell">
+                <Link href={`/dashboard/${record.id}`} title={record.prompt}>
+                  {record.prompt}
+                </Link>
+                <small>
+                  {record.id.slice(0, 8)} · {when(record.createdAt)}
+                </small>
+              </td>
+              <td>
+                <span className={`badge ${record.status === "SETTLED" ? "ok" : "risk"}`}>{record.status}</span>
+              </td>
+              <td>
+                <strong className="amount">{aegisText(record.decision.winner.amountUnits)}</strong>
+              </td>
+              <td>
+                {record.decision.winner.displayName}
+                <small>{PRIORITY_LABEL[record.decision.priority]}</small>
+              </td>
+              <td>{record.payment?.mode ?? "-"}</td>
+            </tr>
+          ))}
         </tbody>
       </table>
     </div>
