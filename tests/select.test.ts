@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { amountUnits, decide, eciScore, logLowerIsBetterScore, SelectionError } from "../src/lib/select";
+import { amountUnits, decide, eciScore, logHigherIsBetterScore, logLowerIsBetterScore, SelectionError } from "../src/lib/select";
 
 /** 400 입력 토큰이 나오도록 1600 바이트짜리 ASCII 요청을 만든다(4바이트 = 1토큰 어림). */
 const PROMPT_400 = "a".repeat(1600);
@@ -64,13 +64,13 @@ describe("Epoch ECI 성능 점수", () => {
     expect(eciScore(150, 150, 150)).toBe(100);
   });
 
-  it("성능 점수에 ECI·신뢰구간·속도 측정 조건을 남긴다", () => {
+  it("성능 점수에 ECI·신뢰구간·속도를 잰 AA 항목을 남긴다", () => {
     const decision = decide({ prompt: PROMPT_400, budgetUnits: 50_000, priority: "intelligence" });
     const haiku = decision.candidates.find((item) => item.key === "anthropic/test-haiku")!;
     expect(haiku.intelligenceScore).toBe(100);
     expect(haiku.eci).toBe(160);
     expect([haiku.eciCiLow, haiku.eciCiHigh]).toEqual([157, 163]);
-    expect(haiku.aaModelName).toBe("Test Haiku");
+    expect(haiku.aaModelNames).toEqual(["Test Haiku"]);
     expect(decision.references.minEci).toBe(140);
     expect(decision.references.maxEci).toBe(160);
     const flash = decision.candidates.find((item) => item.key === "google/test-flash")!;
@@ -113,5 +113,15 @@ describe("가격·속도 로그 점수", () => {
     expect(score("openai/test-mini")).toBe(100);
     expect(score("anthropic/test-haiku")).toBe(0);
     expect(score("google/test-flash")).toBeCloseTo(61.31, 1);
+  });
+
+  it("출력 속도는 클수록 좋다. 가장 빠른 후보 100점, 가장 느린 후보 0점이다", () => {
+    expect(logHigherIsBetterScore(150, 40, 150)).toBe(100);
+    expect(logHigherIsBetterScore(40, 40, 150)).toBeCloseTo(0, 9);
+    const decision = decide({ prompt: PROMPT_400, budgetUnits: 50_000, priority: "speed" });
+    expect(decision.winner.key).toBe("google/test-flash");
+    expect(decision.winner.outputTokensPerSecond).toBe(150);
+    expect(decision.references.minOutputTokensPerSecond).toBe(40);
+    expect(decision.references.maxOutputTokensPerSecond).toBe(150);
   });
 });

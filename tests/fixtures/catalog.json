@@ -8,9 +8,13 @@
       "displayName": "테스트 OpenAI",
       "epochModel": "Test Mini",
       "openRouterId": "openai/test-mini",
-      "aaSlug": "test-mini",
+      "aaSlugs": [
+        "test-mini"
+      ],
       "recipient": "0xF00E8e0ecEF3B405250242F932849edB409497a0",
-      "capabilities": ["reasoning"]
+      "capabilities": [
+        "reasoning"
+      ]
     },
     {
       "key": "anthropic/test-haiku",
@@ -19,9 +23,14 @@
       "displayName": "테스트 Anthropic",
       "epochModel": "Test Haiku",
       "openRouterId": "anthropic/test-haiku",
-      "aaSlug": "test-haiku",
+      "aaSlugs": [
+        "test-haiku"
+      ],
       "recipient": "0xC77492d3AD5c97B09C6529284e71c417Be8926d8",
-      "capabilities": ["reasoning", "vision"]
+      "capabilities": [
+        "reasoning",
+        "vision"
+      ]
     },
     {
       "key": "google/test-flash",
@@ -30,7 +39,9 @@
       "displayName": "테스트 Google",
       "epochModel": "Test Flash",
       "openRouterId": "google/test-flash",
-      "aaSlug": "test-flash",
+      "aaSlugs": [
+        "test-flash"
+      ],
       "recipient": "0x5363903850f7AD4bF5FdbceFe9769A9e5b7080E4",
       "capabilities": []
     }

@@ -38,8 +38,8 @@ export interface CatalogEntry {
   /** Epoch ECI 표의 모델 이름. */
   epochModel: string;
   openRouterId: string;
-  /** 속도를 가져온 Artificial Analysis 항목(생각 단계까지 정해진 것). */
-  aaSlug: string;
+  /** 속도를 가져온 Artificial Analysis 항목들. 같은 모델의 생각 단계별 항목이다. */
+  aaSlugs: string[];
   recipient: string;
   /** OpenRouter 가 알려 준 기능: reasoning, tools, vision */
   capabilities: string[];
@@ -67,11 +67,11 @@ export interface BenchmarkModel {
   /** OpenRouter 판매 단가(1M 토큰당 달러). */
   inputPricePerMillion: string;
   outputPricePerMillion: string;
-  /** AA 가 잰 끝까지 걸린 시간(초)의 최근 72시간 중앙값. */
-  medianEndToEndSeconds: string;
+  /** AA 가 잰 출력 속도(토큰/초) 최근 72시간 중앙값을 생각 단계별로 평균낸 값. */
+  outputTokensPerSecond: string;
   openRouterId: string;
-  aaSlug: string;
-  aaModelName: string;
+  aaSlugs: string[];
+  aaModelNames: string[];
 }
 
 export interface BenchmarkSnapshot {
@@ -125,12 +125,17 @@ export interface ScoredCandidate {
   providerModelId: string;
   recipient: string;
   amountUnits: number;
-  completionMs: number;
+  /** 출력 속도(토큰/초). 이 칸이 생기기 전 기록에는 없다. */
+  outputTokensPerSecond?: number;
+  /** 옛 기록(끝까지 걸린 시간으로 속도를 매기던 때)에만 있다. */
+  completionMs?: number;
   /** Epoch ECI 와 95% 신뢰구간. 이 칸들이 생기기 전 기록에는 없다. */
   eci?: number;
   eciCiLow?: number;
   eciCiHigh?: number;
-  /** 속도를 가져온 AA 항목 이름(생각 단계 포함). */
+  /** 속도를 가져온 AA 항목 이름들(생각 단계 포함). */
+  aaModelNames?: string[];
+  /** 옛 기록에만 있다. 속도를 가져온 AA 항목 하나. */
   aaModelName?: string;
   /** 옛 기록(AA 지능 지수 + LMArena)에만 있는 칸. */
   intelligenceIndex?: number;
@@ -169,7 +174,11 @@ export interface Decision {
     minAmountUnits: number;
     /** 가격·속도를 로그로 펴기 시작한 뒤의 기록에만 있다. */
     maxAmountUnits?: number;
-    minCompletionMs: number;
+    /** 출력 속도로 바꾼 뒤의 기록에만 있다. */
+    minOutputTokensPerSecond?: number;
+    maxOutputTokensPerSecond?: number;
+    /** 옛 기록에만 있다. */
+    minCompletionMs?: number;
     maxCompletionMs?: number;
     minEci?: number;
     maxEci?: number;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildCatalog, normalizeName, parseCsv, perMillion } from "../src/lib/benchmark-sources.mjs";
+import { buildCatalog, buildSnapshot, normalizeName, parseCsv, perMillion } from "../src/lib/benchmark-sources.mjs";
 
 describe("perMillion", () => {
   it("토큰당 단가를 1M 토큰당 단가로 소수점 오차 없이 바꾼다", () => {
@@ -31,10 +31,10 @@ const listing = (id: string, name: string, prompt = "0.000001") => ({
   supported_parameters: ["reasoning", "tools"],
   architecture: { input_modalities: ["text", "image"] },
 });
-const aa = (slug: string, name: string) => ({
+const aa = (slug: string, name: string, speed: number | null = 100) => ({
   slug,
   name,
-  performance: { median_end_to_end_response_time_seconds: 3 },
+  performance: { median_output_tokens_per_second: speed },
 });
 
 describe("buildCatalog", () => {
@@ -50,7 +50,7 @@ describe("buildCatalog", () => {
         displayName: "Claude Opus 5.5",
         epochModel: "Claude Opus 5.5",
         openRouterId: "anthropic/claude-opus-5.5",
-        aaSlug: "claude-opus-5-5",
+        aaSlugs: ["claude-opus-5-5"],
         recipient: "0xanthropic",
         capabilities: ["reasoning", "tools", "vision"],
       },
@@ -58,16 +58,21 @@ describe("buildCatalog", () => {
     expect(normalizeName("Claude Opus 5.5")).toBe(normalizeName("claude-opus-5.5"));
   });
 
-  it("AA 생각 단계가 여러 개면 빼고, Default 단계가 하나면 그 단계를 쓴다", () => {
-    const catalog = buildCatalog(
-      [epoch("Model A"), epoch("Model B")],
-      [listing("org/model-a", "Model A"), listing("org/model-b", "Model B")],
-      [aa("a-low", "Model A (Low)"), aa("a-max", "Model A (Max)"), aa("b-low", "Model B (Low)"), aa("b-mid", "Model B (Medium, Default)")],
-      recipient,
-    );
-    expect(catalog.entries.map((entry) => [entry.key, entry.aaSlug])).toEqual([["org/model-b", "b-mid"]]);
-    expect(catalog.excluded?.[0]).toMatchObject({ name: "Model A" });
-    expect(catalog.excluded?.[0]?.reason).toContain("단계 미정");
+  it("AA 생각 단계가 여러 개면 모두 묶고, 출력 속도는 단계별 평균을 쓴다", () => {
+    const epochRows = [epoch("Model A")];
+    const listings = [listing("org/model-a", "Model A")];
+    const variants = [aa("a-low", "Model A (Low)", 100), aa("a-max", "Model A (Max)", 110), aa("a-off", "Model A (Non-reasoning)", null)];
+    const catalog = buildCatalog(epochRows, listings, variants, recipient);
+    expect(catalog.entries.map((entry) => [entry.key, entry.aaSlugs])).toEqual([["org/model-a", ["a-low", "a-max"]]]);
+    const snapshot = buildSnapshot(catalog, epochRows, listings, variants);
+    expect(snapshot.models[0]!.outputTokensPerSecond).toBe("105");
+    expect(snapshot.models[0]!.aaModelNames).toEqual(["Model A (Low)", "Model A (Max)"]);
+  });
+
+  it("AA 에 이름은 있지만 출력 속도가 없으면 뺀다", () => {
+    const catalog = buildCatalog([epoch("Model B")], [listing("org/model-b", "Model B")], [aa("b", "Model B", null)], recipient);
+    expect(catalog.entries).toEqual([]);
+    expect(catalog.excluded).toEqual([{ name: "Model B", reason: "AA 출력 속도 없음 또는 0" }]);
   });
 
   it("이름이 다르거나 가격이 0 이면 추측하지 않고 이유와 함께 뺀다", () => {
