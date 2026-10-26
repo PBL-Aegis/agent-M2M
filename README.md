@@ -6,8 +6,8 @@ AI 구매 에이전트가 벤치마크 표를 보고 모델 하나를 고른 뒤
 
 요청 → 감사(요청 직후) → 선택 → 기록(처리 중) → 감사(송금 직전) → 결제 → 확인 → 결과 → 기록(성공·실패) → 감사(결제 후)
 
-1. **요청**: 요청 내용, 예산(units), 우선순위(기본·가격·속도·지능), 필요 기능, 요청 번호(`requestId`), 사용자(`userId`). 요청 번호를 비우면 서버가 만들고, 사용자를 비우면 비워 둔 채 기록합니다. 우선순위를 비우면 로컬 Qwen이 요청 문장에 적힌 선호(싸게·빨리·정확하게)를 보고 네 값 중 하나를 고르고, 선호가 없거나 서로 부딪히면 기본을 고릅니다. Qwen이 응답하지 않으면 결제 전에 멈춥니다(503).
-2. **선택**: 후보마다 금액 계산 → 필요 기능으로 하드 필터 → 살아남은 후보끼리 가격·시간·지능 점수 → 가중치 합산 → 고정 규칙으로 동점 처리. 예산은 선택에서 거르지 않습니다(이상 거래 시나리오를 재현하기 위해).
+1. **요청**: 요청 내용, 예산(units), 우선순위(기본·가격·속도·지능), 필요 기능, 요청 번호(`requestId`), 사용자(`userId`). 요청 번호를 비우면 서버가 만들고, 사용자를 비우면 비워 둔 채 기록합니다. 우선순위를 비우면 로컬 Qwen이 요청 문장에 적힌 선호(싸게·빨리·정확하게)를 보고 네 값 중 하나를 고르고, 선호가 없거나 서로 부딪히면 기본을 고릅니다. Qwen이 응답하지 않으면 결제 전에 멈춥니다(503). 화면에서는 기본을 직접 고르지 않고, 우선순위를 비워 둔 "요청 문장으로 판단"이 처음 값입니다.
+2. **선택**: 후보마다 금액 계산 → 필요 기능으로 하드 필터 → 살아남은 후보끼리 가격·속도·성능 점수 → 가중치 합산 → 고정 규칙으로 동점 처리. 예산은 선택에서 거르지 않습니다(이상 거래 시나리오를 재현하기 위해).
 3. **기록(처리 중)**: 결제 직전에 `PROCESSING` 상태로 MongoDB에 먼저 남김.
 4. **감사**: `src/lib/audit.ts` 에 등록한 규칙을 세 번 돌림. 결제를 막지 않는 경고는 `alerts` 컬렉션에 남김.
    - 요청 직후(`ON_REQUEST_CHECKS`): 모델을 고르기 전. 막으면 기록 없이 409. 이전 기록을 돌려주면 새로 처리하지 않고 그 기록을 응답.
@@ -27,16 +27,169 @@ AI 구매 에이전트가 벤치마크 표를 보고 모델 하나를 고른 뒤
 | `/dashboard/purchases` | 전체 요청·결제 기록 |
 | `/dashboard/[id]` | 기록 한 건의 결정 근거 |
 
-## 실행
+## 처음 시작하기
+
+### 1. 설치할 것
+
+| 도구 | 쓰는 곳 | 꼭 필요한가 |
+| --- | --- | --- |
+| Node.js 22 | 앱 실행·테스트 | 필요 |
+| MongoDB | 구매 기록 저장. 자동 테스트도 임시 DB를 만들어 씀 | 필요 |
+| [Foundry](https://getfoundry.sh) (`forge`, `anvil`) | 컨트랙트 빌드·테스트, 로컬 체인 | 필요 |
+| [Ollama](https://ollama.com) + `qwen3.5:4b` | 우선순위를 비운 요청에서 요청 문장을 읽고 우선순위를 정함 | 선택 |
+
+### 2. 받고 준비하기
 
 ```bash
+git clone git@github.com:codenameVien/agent-M2M.git
+cd agent-M2M
+git submodule update --init --recursive   # 컨트랙트 라이브러리(OpenZeppelin, forge-std)
 npm install
-npm run chain      # 로컬 체인(anvil)을 띄우고 토큰 배포·발급. 켜 둔 채로 다른 창에서 다음 명령
-npm run dev        # http://localhost:3100
-npm test           # vitest
+cp .env.example .env.local                # 값은 .env.local 에만 넣는다
+```
+
+`.env.local` 은 그대로 두어도 로컬 체인으로 돌아갑니다. 판매 목록을 다시 만들 때만 `AA_API_KEY` 가 필요합니다.
+
+### 3. 실행하기
+
+```bash
+npm run chain      # 창 1: 로컬 체인(anvil)을 띄우고 토큰 배포·구매자에게 1000 AEGIS 발급. 켜 둔다
+npm run dev        # 창 2: http://localhost:3100
+```
+
+MongoDB 가 꺼져 있으면 먼저 켭니다(아래 "기록 저장소").
+
+### 4. Ollama 는 언제 필요한가
+
+요청에 우선순위(`price`·`speed`·`intelligence`)가 **없을 때만** 씁니다. 이때 Qwen 이 요청 문장을 읽고 우선순위를 스스로 정하고, 문장에 선호가 없거나 서로 부딪히면 **기본 비중(34·33·33)** 을 씁니다(아래 "벤치마크와 판매 모델"의 비중표). 채팅 화면의 처음 값 "요청 문장으로 판단"이 이 경우입니다.
+
+```bash
+ollama pull qwen3.5:4b    # 한 번만. 약 3.3GB
+```
+
+우선순위를 넣어 보내면 Ollama 없이도 모든 기능이 돌아갑니다. Ollama 가 꺼진 채 우선순위를 비워 보내면 결제 전에 멈춥니다(503).
+
+### 5. 확인 명령
+
+```bash
+npm test                    # 서버 자동 테스트 (vitest)
 npm run typecheck
 npm run build
+cd contracts && forge test  # 컨트랙트 테스트
 ```
+
+## 요청 보내기
+
+화면 대신 에이전트처럼 API 로 보낼 수 있습니다. `budgetUnits` 는 최소 단위(1 AEGIS = 1,000,000 units)입니다.
+
+```bash
+# 우선순위를 직접 정해 보냄. Ollama 필요 없음
+curl -s -X POST localhost:3100/api/purchase -H 'content-type: application/json' \
+  -d '{"prompt":"이 글 요약해 줘","budgetUnits":500000,"priority":"price","requestId":"req-001","userId":"user-a"}'
+
+# 우선순위를 비움. Qwen 이 문장("급해")을 읽고 speed 로 정함
+curl -s -X POST localhost:3100/api/purchase -H 'content-type: application/json' \
+  -d '{"prompt":"급해, 빨리 이 글 요약해 줘","budgetUnits":500000}'
+```
+
+| 필드 | 필수 | 뜻 |
+| --- | --- | --- |
+| `prompt` | 예 | 요청 문장 |
+| `budgetUnits` | 예 | 예산(0 이상 정수). 선택에서 거르지는 않고 기록에 남김 |
+| `priority` | 아니오 | `price`·`speed`·`intelligence`·`default`. 비우면 Qwen 이 정함 |
+| `requestId` | 아니오 | 요청 번호. 같은 요청을 다시 보낼 때 같은 값. 비우면 서버가 만듦 |
+| `userId` | 아니오 | 요청한 사용자 |
+| `maxOutputTokens` | 아니오 | 최대 출력 토큰(기본 8000). 금액 계산에 씀 |
+| `requiredCapabilities` | 아니오 | `reasoning`·`tools`·`vision` 중 필요한 것 |
+
+| 응답 | 언제 | 기록 |
+| --- | --- | --- |
+| 200 + 기록(`status: SETTLED`) | 결제와 확인까지 성공 | 남음 |
+| 200 + 기록(`status: FAILED`) | 송금 직전 감사 규칙이 막음, 결제·확인 실패. `failureStage` 로 송금 전·후 구분 | 남음 |
+| 400 | 입력 형식이 틀림, 조건을 통과한 후보가 없음 | 없음 |
+| 409 | 요청 직후 감사 규칙이 막음(예: 같은 요청이 처리 중). 본문에 `rule` | 없음 |
+| 503 | 우선순위를 비웠는데 Ollama 가 응답하지 않음 | 없음 |
+
+## 감사 규칙 추가하기
+
+같은 이상행위를 서버와 체인 두 곳에서 막습니다. 서버는 빨리 거르고 알림을 남기고, 체인은 서버가 뚫려도 마지막에 막습니다. 각자 **새 파일**을 만들고, 함께 쓰는 파일에는 등록 한 줄만 더합니다.
+
+### 서버 규칙
+
+1. `src/lib/rules/<규칙이름>.ts` 를 만들고, 맞는 자리에 함수를 push 합니다.
+
+```ts
+// src/lib/rules/max-amount.ts — 예시: 한 건 0.5 AEGIS 를 넘으면 막고, 80% 이상이면 알림만 남긴다
+import { AuditBlockedError, BEFORE_PAYMENT_CHECKS } from "../audit";
+
+const MAX_UNITS = 500_000;
+
+BEFORE_PAYMENT_CHECKS.push(async (ctx) => {
+  const amount = ctx.decision.winner.amountUnits;
+  if (amount > MAX_UNITS) throw new AuditBlockedError("max-amount", `한 건 상한 초과: ${amount} units`);
+  if (amount >= MAX_UNITS * 0.8) await ctx.alert("max-amount", `한 건 상한의 80% 이상: ${amount} units`);
+});
+```
+
+2. `src/lib/rules/index.ts` 에 `import "./max-amount";` 한 줄을 더합니다. 적은 순서대로 돕니다.
+
+| 자리 | 언제 | 쓸 수 있는 값 | 막으면 |
+| --- | --- | --- | --- |
+| `ON_REQUEST_CHECKS` | 요청 직후, 모델을 고르기 전 | `ctx.request`(요청 번호·사용자·문장) | 기록 없이 409. 이전 기록을 `return` 하면 새로 처리하지 않고 그 기록을 응답 |
+| `BEFORE_PAYMENT_CHECKS` | 모델을 고르고 처리 중 기록을 남긴 뒤, 송금 직전 | `ctx.request`, `ctx.decision`(고른 모델·금액·점수) | 송금하지 않고 `FAILED`·`before-send` 로 기록 |
+| `AFTER_PAYMENT_CHECKS` | 결과가 기록된 뒤 | 위 값 + 두 번째 인자 `record`(최종 상태) | 막을 수 없음. 오류는 알림으로 남고 결과는 그대로 |
+
+알림(`ctx.alert`)은 MongoDB `alerts` 컬렉션에 쌓입니다. 동시에 들어온 요청끼리 겹치지 않게 하려면 확인과 기록을 MongoDB 의 원자적 연산(unique index, `findOneAndUpdate`)으로 한 번에 처리합니다. 프로그램 메모리 안의 잠금은 서버가 여러 개면 소용없습니다.
+
+### 체인 규칙 (Solidity)
+
+1. `contracts/src/rules/<규칙이름>.sol` 에 `PaymentRules` 를 상속한 abstract contract 를 만듭니다. 먼저 `super._checkPayment(...)` 를 불러 다른 규칙도 돌게 하고, 막을 때 revert 합니다. 체인에서는 구매자 지갑 하나(`from`)를 사용자 한 명으로 봅니다.
+
+```solidity
+// contracts/src/rules/MaxAmountRule.sol — 예시
+pragma solidity ^0.8.24;
+
+import {PaymentRules} from "./PaymentRules.sol";
+
+abstract contract MaxAmountRule is PaymentRules {
+    uint256 public constant MAX_AMOUNT = 500_000; // 0.5 AEGIS
+    error OverMaxAmount(uint256 amount);
+
+    function _checkPayment(address from, address to, uint256 amount, bytes32 requestId) internal virtual override {
+        super._checkPayment(from, to, amount, requestId);
+        if (amount > MAX_AMOUNT) revert OverMaxAmount(amount);
+    }
+}
+```
+
+2. `contracts/src/AegisToken.sol` 에서 상속 목록과 `_checkPayment` 의 override 목록에 이름을 더합니다.
+
+```solidity
+contract AegisToken is ERC20, Ownable, PaymentRules, MaxAmountRule {
+    // ...
+    function _checkPayment(address from, address to, uint256 amount, bytes32 requestId)
+        internal virtual override(PaymentRules, MaxAmountRule)
+    {
+        super._checkPayment(from, to, amount, requestId);
+    }
+}
+```
+
+`npm run chain` 을 다시 켜면 규칙이 담긴 토큰이 로컬 체인에 올라가고, 화면에서 막힌 결제는 송금 전 실패로 보입니다.
+
+### 테스트로 증명하기
+
+공격을 재현하는 테스트가 통과하면 "막힌다"가 증명됩니다. 서버는 `tests/`, 체인은 `contracts/test/` 에 둡니다. 서버 규칙 테스트는 `tests/purchase.test.ts` 처럼 결제 모드를 `mock` 으로 두고 `runPurchase` 를 불러 기록의 `status`·`failureStage`·알림을 확인합니다.
+
+## 테스트가 확인하는 것
+
+| 명령 | 진짜로 도는 것 | 가짜로 바꾼 것 | 확인하지 않는 것 |
+| --- | --- | --- | --- |
+| `npm test` | 선택·점수 계산, 감사 규칙 자리, 기록(임시 MongoDB), 짝짓기 규칙 | 결제(`mock`), Qwen 응답, 세 벤치마크 사이트 응답, 벤치마크 숫자(`tests/fixtures/`) | 체인에서 막히는지, Qwen 이 문장을 맞게 읽는지, 실제 사이트 값 |
+| `forge test` | 컨트랙트(발급, `pay`, 규칙이 `pay` 를 막는지) | 없음(메모리 안의 체인) | 서버와 이어진 흐름 |
+| `npm run chain` + `npm run dev` 후 요청 | 전체 흐름: 서버 규칙, 로컬 체인 결제·체인 규칙, 판매창구 확인 | 모델 응답(Mock 문장) | Base Sepolia 결제 |
+| 위 + Ollama 켜고 우선순위 비워 요청 | Qwen 의 우선순위 판단까지 | 모델 응답(Mock 문장) | Base Sepolia 결제 |
+
 
 ## 스마트 컨트랙트
 
@@ -45,12 +198,6 @@ npm run build
 감사 규칙은 `contracts/src/rules/` 에 파일로 따로 둡니다. 규칙은 `PaymentRules` 를 상속해 `_checkPayment` 를 덮어쓰고, 먼저 `super._checkPayment(...)` 를 부른 뒤 막을 때 revert 합니다. `AegisToken` 에는 상속 목록과 `_checkPayment` 의 override 목록에 규칙 이름만 더합니다.
 
 > Base Sepolia 에는 아직 배포하지 않았습니다. 기존 `AEGIS_TOKEN_ADDRESS`(`0xE208…142b`)에는 `pay` 가 없어서, live 결제는 이 컨트랙트를 배포하고 그 주소로 바꾼 뒤에만 동작합니다. local 은 `npm run chain` 이 띄울 때마다 배포합니다.
-
-```bash
-git submodule update --init --recursive   # 처음 받았을 때만
-cd contracts
-forge test
-```
 
 ## 환경변수
 
@@ -64,7 +211,7 @@ forge test
 | `AEGIS_CHAIN_ID` | `84532` | Base Sepolia |
 | `AEGIS_RPC_URL` | `https://sepolia.base.org` | RPC |
 | `AEGIS_BUYER_PRIVATE_KEY` | (비움) | 구매자 지갑 개인키. live에서만 필요 |
-| `AA_API_KEY` | (비움) | Artificial Analysis API 키. 벤치마크 자동 갱신·수동 캡처에 필요 |
+| `AA_API_KEY` | (비움) | Artificial Analysis API 키. 속도 값의 자동 갱신·판매 목록 생성에 필요 |
 | `MONGODB_URI` | `mongodb://127.0.0.1:27017` | MongoDB 접속 주소 |
 | `MONGODB_DB` | `agent_m2m` | 기록을 담을 데이터베이스 이름 |
 | `AEGIS_OLLAMA_URL` | `http://127.0.0.1:11434` | 우선순위 추론용 Ollama. 루프백 주소만 받음 |
@@ -81,53 +228,77 @@ forge test
 
 `local` 은 감사 규칙이 담긴 컨트랙트를 그대로 올려 쓰므로, 체인에서 막히는 것까지 화면에서 확인할 수 있습니다. `npm run chain` 을 끄면 체인과 그 위의 잔액도 사라지고, 다시 켜면 빈 체인에 같은 주소로 새로 배포합니다. 계정은 anvil 의 공개 테스트 계정(0번 운영자, 1번 구매자)이라 실제 자산이 없습니다.
 
-> **경고** — 실제 토큰 전송은 기본적으로 일어나지 않습니다(local). `AEGIS_PAYMENT_MODE=live` **와** `AEGIS_REAL_PAYMENT_APPROVED=yes` 두 변수가 모두 켜져 있고 개인키가 있을 때만 Base Sepolia에서 실제 `transfer`가 실행됩니다. 1건당 금액 상한은 없으므로 live로 켤 때는 예산과 잔액을 직접 확인하세요. 개인키는 절대 커밋하지 마세요.
+> **경고** — 실제 토큰 전송은 기본적으로 일어나지 않습니다(local). `AEGIS_PAYMENT_MODE=live` **와** `AEGIS_REAL_PAYMENT_APPROVED=yes` 두 변수가 모두 켜져 있고 개인키가 있을 때만 Base Sepolia에서 실제 `pay`가 실행됩니다. 1건당 금액 상한은 없으므로 live로 켤 때는 예산과 잔액을 직접 확인하세요. 개인키는 절대 커밋하지 마세요.
 
 ## 기술 스택
 
 Next.js 15 (App Router) · React 19 · TypeScript · viem · MongoDB · Ollama(Qwen) · vitest · Solidity(Foundry·anvil, OpenZeppelin)
 
-## 벤치마크 값 갱신
+## 벤치마크와 판매 모델
 
-`data/benchmark.json` 은 두 출처에서 떠온 실제 값입니다.
+판매 모델(`data/catalog.json`)과 점수의 시작값(`data/benchmark.json`)은 세 출처에서 떠온 실제 값입니다.
 
-| 출처 | 쓰는 값 |
-|---|---|
-| Artificial Analysis 공개 API | 가격 · 응답시간 · 지능 지수 |
-| LMArena 공식 데이터셋 (Hugging Face) | 사람 선호 Elo |
+| 출처 | 쓰는 값 | 키 |
+|---|---|---|
+| [Epoch AI](https://epoch.ai/benchmarks) | 성능: Epoch Capabilities Index(ECI)와 95% 신뢰구간 | 필요 없음 |
+| [OpenRouter](https://openrouter.ai/api/v1/models) | 가격: 1M 토큰당 입력·출력 판매 단가 | 필요 없음 |
+| [Artificial Analysis](https://artificialanalysis.ai/methodology/performance-benchmarking) | 속도: 끝까지 걸린 시간, 하루 여러 번 잰 값의 최근 72시간 중앙값 | `AA_API_KEY` |
 
-가격과 응답시간은 AA에만 있어서 AA 값을 씁니다. **성능 점수만 두 출처를 합칩니다.**
+점수는 출처 하나씩에서 나옵니다.
 
-- AA 점수 = 내 지능 지수 ÷ 후보 중 최고 × 100
-- Arena 점수 = 1등 후보와 붙었을 때 이길 확률 × 200 (1등 = 100점)
-- 성능 점수 = 두 점수의 평균
+- 가격 점수 = (log 최고 금액 − log 내 금액) ÷ (log 최고 − log 최저) × 100
+- 속도 점수 = (log 최장 시간 − log 내 시간) ÷ (log 최장 − log 최단) × 100
+- 성능 점수 = (내 ECI − 최저 ECI) ÷ (최고 − 최저) × 100
 
-두 사이트는 같은 모델을 노력 수준(생각을 얼마나 오래 하는지)별로 따로 잽니다. 서로 다른 단계를
-섞지 않도록 `data/catalog.json` 에 모델마다 `aaSlug` 와 `arenaModel` 을 사람이 직접 적고,
-어느 단계끼리 짝지었는지 `effortPairing` 에 남깁니다. 이름으로 추측해서 찾지 않고, 한 출처라도
-값이 없으면 기본값으로 메우지 않고 멈춥니다.
+세 점수 모두 후보 중 가장 나쁜 값 0점·가장 좋은 값 100점입니다. 가격과 시간은 후보끼리 수십~수백 배 차이 나서 로그로 폅니다. 2배 싼 것은 어느 가격대에서든 같은 만큼 점수가 오르고, 아주 싼 모델 하나가 나머지를 0점 가까이로 누르거나(비율 방식) 아주 비싼 모델 하나에 나머지가 끌려가는(직선 방식) 일이 줄어듭니다. ECI 는 여러 벤치마크를 문제 난이도까지 고려해 통계적으로 합친 지수라 서로 다른 시험을 치른 모델끼리도 비교할 수 있고, 차이 자체가 의미를 가지므로 그대로 폅니다. 결정 근거 화면에 ECI 와 신뢰구간, 속도를 잰 조건(AA 항목 이름)이 함께 나옵니다.
+
+총점은 우선순위별 비중으로 합칩니다(`PRIORITY_WEIGHTS`, `src/lib/types.ts`).
+
+| 우선순위 | 가격 | 속도 | 성능 | 언제 |
+|---|---|---|---|---|
+| 싸게 (`price`) | 80 | 10 | 10 | 요청이 정했거나 문장에 싸게·저렴하게 등이 있을 때 |
+| 빠르게 (`speed`) | 10 | 80 | 10 | 요청이 정했거나 문장에 빨리·급해 등이 있을 때 |
+| 똑똑하게 (`intelligence`) | 10 | 10 | 80 | 요청이 정했거나 문장에 정확하게·꼼꼼히 등이 있을 때 |
+| 기본 (`default`) | 34 | 33 | 33 | 문장에 선호가 없거나 서로 부딪힐 때 |
+
+우선순위는 이 순서로 정해집니다.
+
+1. 요청에 우선순위(`price`·`speed`·`intelligence`)가 있으면 그대로 씁니다.
+2. 없으면 LLM(지금은 로컬 Qwen)이 요청 문장에 적힌 선호를 읽고 정합니다.
+3. 문장에 선호가 없거나(예: "이 글 요약해 줘") 서로 부딪히면(예: "싸고 정확하게") **기본**을 씁니다.
+
+**기본은 사용자가 고르는 값이 아니라, 선호를 알 수 없을 때 쓰는 값**입니다. 그래서 채팅 화면에는 기본이 선택지로 없고 "요청 문장으로 판단"이 처음 값입니다. 선호를 모를 때 어느 한쪽으로 기울면 안 되므로 세 항목을 3분의 1씩(34·33·33) 나눴습니다. 나머지 셋은 원하는 항목에 80을 주고 나머지는 10씩 남겨서, 선호가 같은 후보끼리는 다른 항목으로 갈리게 했습니다. 예를 들어 "싸게"인데 금액이 비슷하면 더 빠르고 똑똑한 쪽이 이깁니다.
+
+### 판매 모델을 고르는 규칙
+
+`scripts/capture-benchmark.mjs` 가 세 출처를 짝지어 판매 목록을 만듭니다. 추측하지 않습니다.
+
+- 세 출처의 모델 이름에서 기호를 빼고 소문자로 바꾼 값이 **정확히 같을 때만** 짝짓습니다.
+- 판매 단위는 기본 모델 하나입니다. AA 는 같은 모델을 생각 단계별로 따로 재므로, 단계가 하나뿐이거나 Default 로 표시된 단계가 하나일 때만 그 값을 씁니다. 단계가 여러 개라 무엇을 팔지 정해지지 않은 모델은 뺍니다.
+- 값이 비거나 0 인 모델도 뺍니다. 빈칸을 기본값으로 채우지 않습니다.
+- **판매 최소 품질 기준**: ECI 140 미만은 팔지 않습니다(`MIN_ECI`, `src/lib/benchmark-sources.mjs`). 운영 판단으로 정한 값이며, 새 모델에도 같은 규칙이 적용됩니다.
+- 뺀 모델과 이유는 `data/catalog.json` 의 `excluded` 에 남습니다.
+- 필요 기능(`requiredCapabilities`)은 OpenRouter 가 알려 준 `reasoning`, `tools`, `vision` 입니다.
+- 판매자 주소는 회사별로 하나이며 `data/sellers.json` 에 있습니다. anvil 공개 테스트 계정이라 실제 자산이 없고, 처음 보는 회사에만 새 주소를 붙입니다.
 
 ### 자동 갱신
 
-구매 요청이 들어왔을 때 가장 최근 값이 **1시간보다 오래됐으면** 두 출처에서 새로 받습니다.
+구매 요청이 들어왔을 때 가장 최근 값이 **1시간보다 오래됐으면** 세 출처에서 판매 목록에 있는 모델의 숫자만 새로 받습니다. 판매 목록 자체는 바뀌지 않습니다.
+
+1시간인 이유: 세 출처 중 가장 자주 바뀌는 값이 AA 속도(하루 8번 측정)라 약 3시간마다 바뀝니다. OpenRouter 가격은 가격이 바뀔 때만, Epoch ECI 는 새 평가가 나올 때만 바뀝니다. 1시간이면 가장 빠른 변화도 놓치지 않으면서, 매 구매마다 세 사이트에 요청해 구매가 몇 초씩 늦어지는 일은 1시간에 한 번으로 줄어듭니다. 주기는 `src/lib/benchmark.ts` 의 `MAX_AGE_MS` 입니다.
 
 - 새로 받은 값은 MongoDB `snapshots` 컬렉션에 해시를 키로 쌓습니다. 결정 기록에 남은 해시로 그때 본 숫자를 찾을 수 있습니다.
-- 받다가 실패하면(사이트 장애, 모델 이름 불일치 등) **마지막으로 받은 값으로 계속**하고, 실패 사유를 결정 기록에 남깁니다.
+- 받다가 실패하면(사이트 장애, 목록의 모델이 출처에서 사라짐 등) **마지막으로 받은 값으로 계속**하고, 실패 사유를 결정 기록에 남깁니다.
 - 한 번도 받지 않았으면 `data/benchmark.json` 을 시작값으로 씁니다.
-- 새로 받는 구매는 약 10초 더 걸립니다(Arena 데이터셋을 여러 쪽 나눠 받기 때문).
 
-### 손으로 다시 뜨기
-
-시작값을 새로 만들거나 이름을 검색할 때:
+### 판매 목록 다시 만들기
 
 ```bash
-node scripts/capture-benchmark.mjs
-node scripts/capture-benchmark.mjs --list gemini   # AA 슬러그 검색
-node scripts/capture-benchmark.mjs --arena opus    # Arena 모델 이름 검색
+node scripts/capture-benchmark.mjs --list   # 저장하지 않고 짝지어진 모델과 뺀 모델만 보기
+node scripts/capture-benchmark.mjs          # data/catalog.json · benchmark.json · sellers.json 갱신
 ```
 
-AA 키는 `.env.local` 의 `AA_API_KEY` 에서만 읽습니다(자동 갱신도 같은 키를 씁니다). 떠온 시각과 Arena 발행일이
-스냅샷에 함께 저장되고, 결정 기록에는 그 스냅샷의 해시와 받아 온 시각이 남습니다. 테스트는 `tests/fixtures/` 의 고정 숫자만 봅니다.
+판매 목록이 바뀌는 곳은 이 스크립트뿐입니다. 결과를 확인하고 커밋합니다. AA 키는 `.env.local` 의 `AA_API_KEY` 에서만 읽습니다(자동 갱신도 같은 키를 씁니다). 테스트는 `tests/fixtures/` 의 고정 숫자만 봅니다.
 
 ## 기록 저장소
 

@@ -15,6 +15,8 @@ import { pay, PaymentError, paymentConfig } from "./payment";
 import { inferPriority } from "./priority-llm";
 import { mockResult, verifyPayment } from "./provider";
 import { decide } from "./select";
+// 감사 규칙 파일들을 불러와 audit.ts 의 규칙 목록에 등록한다.
+import "./rules";
 import { purchaseExists, savePurchase, updatePurchase, type PurchaseOutcome } from "./store";
 import type { PaymentResult, PurchaseInput, PurchaseRecord, PurchaseRequest } from "./types";
 

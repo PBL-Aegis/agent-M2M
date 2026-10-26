@@ -1,4 +1,4 @@
-import { cpSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -13,14 +13,10 @@ const HOUR = 60 * 60 * 1000;
 const originalFetch = globalThis.fetch;
 const previousDataDir = process.env.AGENT_M2M_DATA_DIR;
 
-// 카탈로그에 Arena 이름을 채운 임시 데이터 폴더. 시작값(benchmark.json)은 픽스처 그대로다.
+// 픽스처를 임시 폴더에 복사해 쓴다. 시작값(benchmark.json)은 픽스처 그대로다.
 beforeAll(() => {
   const dir = mkdtempSync(path.join(tmpdir(), "agent-m2m-bench-"));
   cpSync(path.join(import.meta.dirname, "fixtures"), dir, { recursive: true });
-  const catalogFile = path.join(dir, "catalog.json");
-  const catalog = JSON.parse(readFileSync(catalogFile, "utf8"));
-  for (const entry of catalog.entries) entry.arenaModel = `${entry.aaSlug}-arena`;
-  writeFileSync(catalogFile, JSON.stringify(catalog));
   process.env.AGENT_M2M_DATA_DIR = dir;
   process.env.AA_API_KEY = "test-key";
 });
@@ -36,30 +32,34 @@ afterAll(async () => {
   await store.closeStore();
 });
 
-const SLUGS = ["test-mini", "test-haiku", "test-flash"];
+const MODELS = [
+  { epoch: "Test Mini", openRouter: "openai/test-mini", aa: "test-mini" },
+  { epoch: "Test Haiku", openRouter: "anthropic/test-haiku", aa: "test-haiku" },
+  { epoch: "Test Flash", openRouter: "google/test-flash", aa: "test-flash" },
+];
 
+/** 세 출처를 흉내 낸다. Epoch 는 CSV, 나머지는 JSON 이다. */
 function fakeSources(): ReturnType<typeof vi.fn> {
   return vi.fn(async (url: string) => {
-    if (url.startsWith("https://artificialanalysis.ai/")) {
-      const data = SLUGS.map((slug) => ({
-        slug,
-        name: slug,
-        pricing: { price_1m_input_tokens: 1, price_1m_output_tokens: 2 },
-        performance: { median_end_to_end_response_time_seconds: 3 },
-        evaluations: { artificial_analysis_intelligence_index: 50 },
+    if (url.startsWith("https://epoch.ai/")) {
+      const rows = MODELS.map((model) => `${model.epoch},${model.epoch},150,148,152,2026-10-01,Org,Country,API access,Closed weights,`);
+      const header = "Model,Display name,eci,eci_ci_low,eci_ci_high,date,Organization,Country (of organization),Model accessibility,Accessibility group,model_versions";
+      return new Response([header, ...rows].join("\n"));
+    }
+    if (url.startsWith("https://openrouter.ai/")) {
+      const data = MODELS.map((model) => ({
+        id: model.openRouter,
+        name: model.epoch,
+        pricing: { prompt: "0.000001", completion: "0.000002" },
       }));
       return new Response(JSON.stringify({ data }));
     }
-    const rows = SLUGS.map((slug) => ({
-      row: {
-        model_name: `${slug}-arena`,
-        rating: 1400,
-        vote_count: 10,
-        category: "overall",
-        leaderboard_publish_date: "2026-10-01",
-      },
+    const data = MODELS.map((model) => ({
+      slug: model.aa,
+      name: model.epoch,
+      performance: { median_end_to_end_response_time_seconds: 3 },
     }));
-    return new Response(JSON.stringify({ rows }));
+    return new Response(JSON.stringify({ data }));
   });
 }
 
@@ -67,17 +67,21 @@ describe("loadFreshSnapshot", () => {
   it("값이 1시간보다 오래되면 실패해도 마지막 값으로 계속하고 사유를 남긴다", async () => {
     globalThis.fetch = vi.fn(async () => new Response("down", { status: 503 })) as typeof fetch;
     const result = await loadFreshSnapshot();
-    expect(result.snapshot.snapshotId).toBe("test-fixture-v1");
+    expect(result.snapshot.snapshotId).toBe("test-fixture-v2");
     expect(result.refreshError).toMatch(/503/);
   });
 
-  it("값이 오래되면 두 출처에서 새로 받아 저장한다", async () => {
+  it("값이 오래되면 세 출처에서 새로 받아 저장한다", async () => {
     const fetchMock = fakeSources();
     globalThis.fetch = fetchMock as unknown as typeof fetch;
     const result = await loadFreshSnapshot();
     expect(result.refreshError).toBeNull();
-    expect(result.snapshot.arena?.publishDate).toBe("2026-10-01");
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.snapshot.models.map((model) => [model.key, model.eci, model.inputPricePerMillion])).toEqual([
+      ["openai/test-mini", "150", "1"],
+      ["anthropic/test-haiku", "150", "1"],
+      ["google/test-flash", "150", "1"],
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(await store.latestSnapshot()).toEqual({ snapshot: result.snapshot, hash: result.hash });
   });
 
