@@ -10,8 +10,8 @@ AI 구매 에이전트가 벤치마크 표를 보고 모델 하나를 고른 뒤
 2. **선택**: 후보마다 금액 계산 → 필요 기능으로 하드 필터 → 살아남은 후보끼리 가격·시간·지능 점수 → 가중치 합산 → 고정 규칙으로 동점 처리. 예산은 선택에서 거르지 않습니다(이상 거래 시나리오를 재현하기 위해).
 3. **기록(처리 중)**: 결제 직전에 `PROCESSING` 상태로 MongoDB에 먼저 남김.
 4. **감사**: `src/lib/audit.ts` 의 `BEFORE_PAYMENT_CHECKS` 에 등록한 규칙을 차례로 돌림. 하나라도 막으면 송금하지 않음. 결제를 막지 않는 경고는 `alerts` 컬렉션에 남김.
-5. **결제**: 선택된 모델의 수신자 주소로 AEGIS `transfer` (기본은 mock).
-6. **확인**: 판매창구가 체인의 Transfer 기록에서 수신자·금액을 대조(live일 때).
+5. **결제**: 선택된 모델의 수신자 주소로 AEGIS `pay(수신자, 금액, 요청 번호)` (기본은 mock). 요청 번호는 문자열의 keccak256 으로 넘깁니다.
+6. **확인**: 판매창구가 체인의 `Paid` 기록에서 요청 번호·수신자·금액을 대조(live일 때).
 7. **결과**: Mock 응답 문장.
 8. **기록(성공·실패)**: 같은 기록의 상태를 `SETTLED` 또는 `FAILED` 로 바꿈. 실패는 송금 전(`before-send`)·송금 후(`after-send`)를 구분하고, 송금 후 실패면 거래번호를 그대로 남김. 후보·점수·탈락 사유 같은 결정 근거는 처음 저장한 뒤 고치지 않음.
 
@@ -36,7 +36,11 @@ npm run build
 
 ## 스마트 컨트랙트
 
-`contracts/` 는 Foundry 프로젝트입니다. `AegisToken` 은 소수점 6자리 ERC-20이며 운영자만 새로 발급합니다. 감사 규칙 중 체인에서 막을 검사는 이 컨트랙트에 덧붙입니다. 아직 배포하지 않았고, 현재 결제는 위 `AEGIS_TOKEN_ADDRESS` 의 기존 토큰을 씁니다.
+`contracts/` 는 Foundry 프로젝트입니다. `AegisToken` 은 소수점 6자리 ERC-20이며 운영자만 새로 발급합니다. 구매 결제는 `pay` 로 하며, `pay` 는 송금 전에 감사 규칙을 돌리고 `Paid(요청 번호, 보낸 쪽, 받는 쪽, 금액)` 이벤트를 남깁니다.
+
+감사 규칙은 `contracts/src/rules/` 에 파일로 따로 둡니다. 규칙은 `PaymentRules` 를 상속해 `_checkPayment` 를 덮어쓰고, 먼저 `super._checkPayment(...)` 를 부른 뒤 막을 때 revert 합니다. `AegisToken` 에는 상속 목록과 `_checkPayment` 의 override 목록에 규칙 이름만 더합니다.
+
+> 아직 배포하지 않았습니다. 기존 `AEGIS_TOKEN_ADDRESS`(`0xE208…142b`)에는 `pay` 가 없어서, live 결제는 이 컨트랙트를 배포하고 그 주소로 바꾼 뒤에만 동작합니다. mock 은 그대로 동작합니다.
 
 ```bash
 git submodule update --init --recursive   # 처음 받았을 때만

@@ -1,5 +1,7 @@
 /**
- * 결제. AEGIS 토큰(ERC-20)을 선택된 모델의 수신자 주소로 보낸다.
+ * 결제. AEGIS 토큰(ERC-20)의 pay 로 선택된 모델의 수신자 주소에 보낸다.
+ * pay 는 요청 번호를 함께 받아 체인의 감사 규칙(contracts/)을 돌린 뒤 송금한다.
+ * 그래서 live 는 pay 가 있는 토큰(contracts/src/AegisToken.sol)을 배포한 주소에서만 동작한다.
  *
  * 기본값은 mock이다. 실제 전송은 두 가지가 모두 켜져 있을 때만 일어난다.
  *   AEGIS_PAYMENT_MODE=live
@@ -7,13 +9,32 @@
  * 개인키는 이 파일 안에서만 읽고, 밖으로 내보내지 않는다. 화면과 기록에는 주소만 남는다.
  */
 
-import { createPublicClient, createWalletClient, http, getAddress, type Hex } from "viem";
+import {
+  createPublicClient,
+  createWalletClient,
+  getAddress,
+  http,
+  keccak256,
+  stringToBytes,
+  type Hex,
+} from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { baseSepolia } from "viem/chains";
 
 import type { PaymentMode, PaymentResult } from "./types";
 
-export const ERC20_ABI = [
+export const AEGIS_ABI = [
+  {
+    type: "function",
+    name: "pay",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "to", type: "address" },
+      { name: "amount", type: "uint256" },
+      { name: "requestId", type: "bytes32" },
+    ],
+    outputs: [],
+  },
   {
     type: "function",
     name: "transfer",
@@ -47,7 +68,22 @@ export const ERC20_ABI = [
       { name: "value", type: "uint256", indexed: false },
     ],
   },
+  {
+    type: "event",
+    name: "Paid",
+    inputs: [
+      { name: "requestId", type: "bytes32", indexed: true },
+      { name: "from", type: "address", indexed: true },
+      { name: "to", type: "address", indexed: true },
+      { name: "amount", type: "uint256", indexed: false },
+    ],
+  },
 ] as const;
+
+/** 체인에 넘기는 요청 번호. 요청 번호 문자열의 keccak256 이다. */
+export function requestIdHash(requestId: string): Hex {
+  return keccak256(stringToBytes(requestId));
+}
 
 /** sent 가 true 면 거래를 체인에 보낸 뒤 실패한 것이다. 돈이 나갔을 수 있다. */
 export class PaymentError extends Error {
@@ -105,7 +141,7 @@ export async function buyerBalance(): Promise<{ units: number | null; status: st
   try {
     const balance = await publicClient(config).readContract({
       address: getAddress(config.tokenAddress.trim()),
-      abi: ERC20_ABI,
+      abi: AEGIS_ABI,
       functionName: "balanceOf",
       args: [getAddress(config.buyerAddress)],
     });
@@ -119,9 +155,11 @@ export async function pay(args: {
   amountUnits: number;
   recipient: string;
   purchaseId: string;
+  requestId: string;
 }): Promise<PaymentResult> {
   const config = paymentConfig();
   const to = getAddress(args.recipient);
+  const requestHash = requestIdHash(args.requestId);
 
   if (config.mode === "mock") {
     // 실제 전송 없이 흐름만 이어간다. 기록에 mock임을 분명히 남긴다.
@@ -133,6 +171,7 @@ export async function pay(args: {
       amountUnits: args.amountUnits,
       tokenAddress: config.tokenAddress || "0xmock",
       chainId: config.chainId,
+      requestIdHash: requestHash,
     };
   }
 
@@ -147,7 +186,7 @@ export async function pay(args: {
 
   const balance = await reader.readContract({
     address: token,
-    abi: ERC20_ABI,
+    abi: AEGIS_ABI,
     functionName: "balanceOf",
     args: [account.address],
   });
@@ -159,9 +198,9 @@ export async function pay(args: {
 
   const txHash = await wallet.writeContract({
     address: token,
-    abi: ERC20_ABI,
-    functionName: "transfer",
-    args: [to, BigInt(args.amountUnits)],
+    abi: AEGIS_ABI,
+    functionName: "pay",
+    args: [to, BigInt(args.amountUnits), requestHash],
   });
   // 여기부터는 거래가 체인에 나간 뒤다. 어떤 실패든 송금 후 실패로 알린다.
   let receipt;
@@ -183,6 +222,7 @@ export async function pay(args: {
     amountUnits: args.amountUnits,
     tokenAddress: token,
     chainId: config.chainId,
+    requestIdHash: requestHash,
     blockNumber: receipt.blockNumber.toString(),
   };
 }

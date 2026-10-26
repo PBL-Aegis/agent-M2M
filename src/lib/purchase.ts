@@ -64,10 +64,11 @@ export async function runPurchase(input: PurchaseInput): Promise<PurchaseRecord>
       amountUnits: decision.winner.amountUnits,
       recipient: decision.winner.recipient,
       purchaseId: id,
+      requestId: request.requestId,
     });
 
     // 4) 판매창구가 스스로 확인한 뒤에만 결과를 준다.
-    await verifyPayment(payment, decision.winner);
+    await verifyPayment(payment, decision.winner, request.requestId);
     const resultText = mockResult(request.prompt, decision.winner);
     outcome = { status: "SETTLED", payment, resultText, failureReason: null };
   } catch (error) {

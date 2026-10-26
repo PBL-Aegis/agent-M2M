@@ -177,6 +177,8 @@ export interface PaymentResult {
   amountUnits: number;
   tokenAddress: string;
   chainId: number;
+  /** 체인에 넘긴 요청 번호(keccak256). 이 칸이 생기기 전 기록에는 없다. */
+  requestIdHash?: string;
   /** live일 때만 채워진다. */
   blockNumber?: string;
 }

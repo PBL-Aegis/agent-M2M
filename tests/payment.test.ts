@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { pay, paymentConfig } from "../src/lib/payment";
+import { pay, paymentConfig, requestIdHash } from "../src/lib/payment";
 
 const RECIPIENT = "0xF00E8e0ecEF3B405250242F932849edB409497a0";
 
@@ -21,11 +21,12 @@ describe("pay (mock)", () => {
   });
 
   it("mock 모드에서는 mock: 거래번호를 돌려주고 네트워크를 건드리지 않는다", async () => {
-    const result = await pay({ amountUnits: 12_960, recipient: RECIPIENT, purchaseId: "test-1" });
+    const result = await pay({ amountUnits: 12_960, recipient: RECIPIENT, purchaseId: "test-1", requestId: "req-1" });
     expect(result.mode).toBe("mock");
     expect(result.txHash).toBe("mock:test-1");
     expect(result.to).toBe(RECIPIENT);
     expect(result.amountUnits).toBe(12_960);
+    expect(result.requestIdHash).toBe(requestIdHash("req-1"));
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
