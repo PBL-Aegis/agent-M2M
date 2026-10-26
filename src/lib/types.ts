@@ -74,6 +74,10 @@ export interface BenchmarkSnapshot {
 
 /** 사용자가 보낸 요청. */
 export interface PurchaseRequest {
+  /** 요청을 보낸 프로그램이 붙인 요청 번호. 같은 요청을 다시 보내면 같은 번호가 온다. */
+  requestId: string;
+  /** 요청한 사용자. 사용자 확인 방식은 아직 정하지 않았다. */
+  userId: string | null;
   prompt: string;
   budgetUnits: number;
   priority: Priority;
@@ -81,8 +85,15 @@ export interface PurchaseRequest {
   requiredCapabilities?: string[];
 }
 
-/** API 로 들어온 요청. 우선순위가 비어 있으면 로컬 Qwen 이 요청 문장을 보고 채운다. */
-export type PurchaseInput = Omit<PurchaseRequest, "priority"> & { priority?: Priority };
+/**
+ * API 로 들어온 요청. 우선순위가 비어 있으면 로컬 Qwen 이 요청 문장을 보고 채운다.
+ * 요청 번호가 비어 있으면 서버가 새로 만들고, 사용자가 비어 있으면 null 로 둔다.
+ */
+export type PurchaseInput = Omit<PurchaseRequest, "priority" | "requestId" | "userId"> & {
+  priority?: Priority;
+  requestId?: string;
+  userId?: string;
+};
 
 /** 결정에 쓰인 우선순위가 어디서 왔는지. */
 export type PrioritySource = "request" | "local-llm";
@@ -170,15 +181,37 @@ export interface PaymentResult {
   blockNumber?: string;
 }
 
-export type PurchaseStatus = "SETTLED" | "FAILED";
+/** PROCESSING 은 결제 직전에 저장되고, 끝나면 SETTLED 나 FAILED 로 바뀐다. */
+export type PurchaseStatus = "PROCESSING" | "SETTLED" | "FAILED";
+
+/** 실패가 송금 전인지 후인지. 송금 후 실패는 돈이 나갔을 수 있으므로 다시 결제하면 안 된다. */
+export type FailureStage = "before-send" | "after-send";
 
 export interface PurchaseRecord {
   id: string;
+  /** 이 칸들이 생기기 전 기록에는 없다. */
+  requestId?: string;
+  userId?: string | null;
   createdAt: string;
+  /** 상태가 마지막으로 바뀐 시각. 이 칸이 생기기 전 기록에는 없다. */
+  updatedAt?: string;
   prompt: string;
   status: PurchaseStatus;
   decision: Decision;
   payment: PaymentResult | null;
   resultText: string | null;
   failureReason: string | null;
+  /** FAILED 일 때만 채워진다. 이 칸이 생기기 전 기록에는 없다. */
+  failureStage?: FailureStage;
+}
+
+/** 감사 규칙이 남긴 알림. 결제를 막지 않는 경고도 여기에 쌓인다. */
+export interface AuditAlert {
+  id: string;
+  createdAt: string;
+  purchaseId: string;
+  userId: string | null;
+  /** 알림을 남긴 규칙 이름. */
+  rule: string;
+  message: string;
 }

@@ -49,7 +49,15 @@ export const ERC20_ABI = [
   },
 ] as const;
 
-export class PaymentError extends Error {}
+/** sent 가 true 면 거래를 체인에 보낸 뒤 실패한 것이다. 돈이 나갔을 수 있다. */
+export class PaymentError extends Error {
+  constructor(
+    message: string,
+    readonly sent = false,
+  ) {
+    super(message);
+  }
+}
 
 export interface PaymentConfig {
   mode: PaymentMode;
@@ -155,9 +163,16 @@ export async function pay(args: {
     functionName: "transfer",
     args: [to, BigInt(args.amountUnits)],
   });
-  const receipt = await reader.waitForTransactionReceipt({ hash: txHash });
+  // 여기부터는 거래가 체인에 나간 뒤다. 어떤 실패든 송금 후 실패로 알린다.
+  let receipt;
+  try {
+    receipt = await reader.waitForTransactionReceipt({ hash: txHash });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "알 수 없는 오류";
+    throw new PaymentError(`전송 결과를 확인하지 못했습니다: ${txHash} (${reason})`, true);
+  }
   if (receipt.status !== "success") {
-    throw new PaymentError(`전송이 실패했습니다: ${txHash}`);
+    throw new PaymentError(`전송이 실패했습니다: ${txHash}`, true);
   }
 
   return {

@@ -4,14 +4,16 @@ AI 구매 에이전트가 벤치마크 표를 보고 모델 하나를 고른 뒤
 
 ## 흐름
 
-요청 → 선택 → 결제 → 확인 → 결과 → 기록
+요청 → 선택 → 기록(처리 중) → 감사 → 결제 → 확인 → 결과 → 기록(성공·실패)
 
-1. **요청**: 요청 내용, 예산(units), 우선순위(기본·가격·속도·지능), 필요 기능. 우선순위를 비우면 로컬 Qwen이 요청 문장에 적힌 선호(싸게·빨리·정확하게)를 보고 네 값 중 하나를 고르고, 선호가 없거나 서로 부딪히면 기본을 고릅니다. Qwen이 응답하지 않으면 결제 전에 멈춥니다(503).
+1. **요청**: 요청 내용, 예산(units), 우선순위(기본·가격·속도·지능), 필요 기능, 요청 번호(`requestId`), 사용자(`userId`). 요청 번호를 비우면 서버가 만들고, 사용자를 비우면 비워 둔 채 기록합니다. 우선순위를 비우면 로컬 Qwen이 요청 문장에 적힌 선호(싸게·빨리·정확하게)를 보고 네 값 중 하나를 고르고, 선호가 없거나 서로 부딪히면 기본을 고릅니다. Qwen이 응답하지 않으면 결제 전에 멈춥니다(503).
 2. **선택**: 후보마다 금액 계산 → 필요 기능으로 하드 필터 → 살아남은 후보끼리 가격·시간·지능 점수 → 가중치 합산 → 고정 규칙으로 동점 처리. 예산은 선택에서 거르지 않습니다(이상 거래 시나리오를 재현하기 위해).
-3. **결제**: 선택된 모델의 수신자 주소로 AEGIS `transfer` (기본은 mock).
-4. **확인**: 판매창구가 체인의 Transfer 기록에서 수신자·금액을 대조(live일 때).
-5. **결과**: Mock 응답 문장.
-6. **기록**: 후보·점수·탈락 사유·가중치·스냅샷 해시·거래번호를 MongoDB에 덧붙임.
+3. **기록(처리 중)**: 결제 직전에 `PROCESSING` 상태로 MongoDB에 먼저 남김.
+4. **감사**: `src/lib/audit.ts` 의 `BEFORE_PAYMENT_CHECKS` 에 등록한 규칙을 차례로 돌림. 하나라도 막으면 송금하지 않음. 결제를 막지 않는 경고는 `alerts` 컬렉션에 남김.
+5. **결제**: 선택된 모델의 수신자 주소로 AEGIS `transfer` (기본은 mock).
+6. **확인**: 판매창구가 체인의 Transfer 기록에서 수신자·금액을 대조(live일 때).
+7. **결과**: Mock 응답 문장.
+8. **기록(성공·실패)**: 같은 기록의 상태를 `SETTLED` 또는 `FAILED` 로 바꿈. 실패는 송금 전(`before-send`)·송금 후(`after-send`)를 구분하고, 송금 후 실패면 거래번호를 그대로 남김. 후보·점수·탈락 사유 같은 결정 근거는 처음 저장한 뒤 고치지 않음.
 
 ## 화면
 
@@ -30,6 +32,16 @@ npm run dev        # http://localhost:3100
 npm test           # vitest
 npm run typecheck
 npm run build
+```
+
+## 스마트 컨트랙트
+
+`contracts/` 는 Foundry 프로젝트입니다. `AegisToken` 은 소수점 6자리 ERC-20이며 운영자만 새로 발급합니다. 감사 규칙 중 체인에서 막을 검사는 이 컨트랙트에 덧붙입니다. 아직 배포하지 않았고, 현재 결제는 위 `AEGIS_TOKEN_ADDRESS` 의 기존 토큰을 씁니다.
+
+```bash
+git submodule update --init --recursive   # 처음 받았을 때만
+cd contracts
+forge test
 ```
 
 ## 환경변수
@@ -55,7 +67,7 @@ npm run build
 
 ## 기술 스택
 
-Next.js 15 (App Router) · React 19 · TypeScript · viem · MongoDB · Ollama(Qwen) · vitest
+Next.js 15 (App Router) · React 19 · TypeScript · viem · MongoDB · Ollama(Qwen) · vitest · Solidity(Foundry, OpenZeppelin)
 
 ## 벤치마크 값 갱신
 

@@ -2,7 +2,8 @@
  * 기록. 구매 한 건에 대해 요청·후보·점수·탈락 사유·금액·거래번호·결과를 남긴다.
  *
  * MongoDB 컬렉션 하나(purchases)에 저장한다. 화면은 DB에 직접 붙지 않고 이 모듈의 함수만 쓴다.
- * 한 번 저장한 문서는 고치지 않는다(덧붙이기만).
+ * 구매 기록은 결제 직전에 PROCESSING 으로 저장하고, 끝나면 그 문서의 상태와 결과만 고친다.
+ * 결정 근거(decision)는 처음 저장한 뒤로 고치지 않는다.
  *
  * 문서를 JSON 문자열로 뭉쳐 넣지 않고 그대로 넣는 이유는, 나중에 "같은 수신자에게 반복 결제",
  * "시간대별 묶기" 같은 질의를 DB에서 바로 돌리기 위해서다. 구매 번호를 `_id` 로 쓰므로
@@ -10,22 +11,34 @@
  *
  * 구매 때 새로 받아 온 벤치마크 스냅샷은 snapshots 컬렉션에 해시를 `_id` 로 쌓는다.
  * 결정 기록에는 해시만 남으므로, 그 해시로 "그때 본 숫자"를 다시 찾을 수 있다.
+ *
+ * 감사 규칙이 남긴 알림은 alerts 컬렉션에 덧붙인다.
  */
 
 import { MongoClient, type Collection, type Db } from "mongodb";
 
-import type { BenchmarkSnapshot, PurchaseRecord } from "./types";
+import type { AuditAlert, BenchmarkSnapshot, PurchaseRecord } from "./types";
 
 const URI = process.env.MONGODB_URI ?? "mongodb://127.0.0.1:27017";
 const DB_NAME = process.env.MONGODB_DB ?? "agent_m2m";
 const COLLECTION = "purchases";
 const SNAPSHOTS = "snapshots";
+const ALERTS = "alerts";
 
 /** `_id` 에 구매 번호가 들어간 저장 형태. */
 type PurchaseDocument = Omit<PurchaseRecord, "id"> & { _id: string };
 
 /** `_id` 에 스냅샷 해시가 들어간 저장 형태. */
 type SnapshotDocument = { _id: string; capturedAt: string; snapshot: BenchmarkSnapshot };
+
+/** `_id` 에 알림 번호가 들어간 저장 형태. */
+type AlertDocument = Omit<AuditAlert, "id"> & { _id: string };
+
+/** 결제가 끝난 뒤 바꿀 수 있는 칸. */
+export type PurchaseOutcome = Pick<
+  PurchaseRecord,
+  "status" | "payment" | "resultText" | "failureReason" | "failureStage"
+>;
 
 let client: MongoClient | null = null;
 let ready: Promise<Db> | null = null;
@@ -38,6 +51,7 @@ async function connect(): Promise<Db> {
   // 최근 순 조회가 기본이라 정렬 기준에 색인을 둔다.
   await db.collection<PurchaseDocument>(COLLECTION).createIndex({ createdAt: -1 });
   await db.collection<SnapshotDocument>(SNAPSHOTS).createIndex({ capturedAt: -1 });
+  await db.collection<AlertDocument>(ALERTS).createIndex({ createdAt: -1 });
   return db;
 }
 
@@ -51,6 +65,11 @@ async function snapshots(): Promise<Collection<SnapshotDocument>> {
   return (await ready).collection<SnapshotDocument>(SNAPSHOTS);
 }
 
+async function alerts(): Promise<Collection<AlertDocument>> {
+  ready ??= connect();
+  return (await ready).collection<AlertDocument>(ALERTS);
+}
+
 function toRecord(document: PurchaseDocument): PurchaseRecord {
   const { _id, ...rest } = document;
   return { id: _id, ...rest };
@@ -59,6 +78,24 @@ function toRecord(document: PurchaseDocument): PurchaseRecord {
 export async function savePurchase(record: PurchaseRecord): Promise<void> {
   const { id, ...rest } = record;
   await (await purchases()).insertOne({ _id: id, ...rest });
+}
+
+/** 결제 결과를 기록에 적고 바꾼 시각을 돌려준다. 결정 근거는 건드리지 않는다. */
+export async function updatePurchase(id: string, outcome: PurchaseOutcome): Promise<string> {
+  const updatedAt = new Date().toISOString();
+  const result = await (await purchases()).updateOne({ _id: id }, { $set: { ...outcome, updatedAt } });
+  if (result.matchedCount === 0) throw new Error(`구매 기록이 없습니다: ${id}`);
+  return updatedAt;
+}
+
+export async function saveAlert(alert: AuditAlert): Promise<void> {
+  const { id, ...rest } = alert;
+  await (await alerts()).insertOne({ _id: id, ...rest });
+}
+
+export async function listAlerts(limit = 50): Promise<AuditAlert[]> {
+  const documents = await (await alerts()).find({}, { sort: { createdAt: -1, _id: -1 }, limit }).toArray();
+  return documents.map(({ _id, ...rest }) => ({ id: _id, ...rest }));
 }
 
 export async function listPurchases(limit = 50): Promise<PurchaseRecord[]> {

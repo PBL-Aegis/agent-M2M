@@ -3,6 +3,7 @@
  *
  * 입력은 여기서 모양만 검사한다(문자열인지, 정수인지, 네 우선순위 중 하나인지).
  * 우선순위는 빼도 된다. 빼면 로컬 Qwen 이 요청 문장을 보고 정한다.
+ * requestId·userId 도 빼도 된다. requestId 를 빼면 서버가 새로 만든다.
  * 예산 부족 같은 판단은 select.ts 가 하고, 그 결과는 400 이 아니라 기록으로 남는다.
  */
 
@@ -34,6 +35,13 @@ function parseBody(body: unknown): PurchaseInput | string {
   }
 
   const request: PurchaseInput = { prompt, budgetUnits };
+
+  for (const field of ["requestId", "userId"] as const) {
+    const value = input[field];
+    if (value === undefined) continue;
+    if (typeof value !== "string" || value.trim() === "") return `${field} 는 비어 있지 않은 문자열이거나 비어 있어야 합니다`;
+    request[field] = value.trim();
+  }
 
   const priority = input.priority;
   if (priority !== undefined) {
