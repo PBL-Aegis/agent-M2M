@@ -5,12 +5,13 @@
  *   Epoch AI       — 성능. Epoch Capabilities Index(ECI)와 95% 신뢰구간. 여러 벤치마크를 난이도까지
  *                    고려해 통계적으로 합친 지수다. 키 없이 받는다.
  *   OpenRouter     — 가격. 실제로 파는 1M 토큰당 입력·출력 단가. 키 없이 받는다.
- *   Artificial Analysis — 속도. 하루 여러 번 잰 끝까지 걸린 시간의 최근 72시간 중앙값. AA_API_KEY 가 필요하다.
+ *   Artificial Analysis — 속도. 출력 속도(1초에 내보내는 토큰 수)의 최근 72시간 중앙값. AA_API_KEY 가 필요하다.
  *
  * 판매 목록은 사람이 이름을 적지 않고 buildCatalog 가 만든다. 짝짓기는 추측하지 않는다.
  *   - 세 출처의 모델 이름에서 기호를 빼고 소문자로 바꾼 값이 정확히 같을 때만 짝짓는다.
- *   - AA 는 같은 모델을 생각 단계별로 따로 잰다. 단계가 하나뿐이거나 Default 로 표시된 단계가
- *     하나일 때만 쓰고, 여러 단계 중 무엇을 팔지 정해지지 않은 모델은 뺀다.
+ *   - AA 는 같은 모델을 생각 단계(effort)별로 따로 잰다. 끝까지 걸린 시간은 단계에 따라 몇 배씩 달라지지만
+ *     출력 속도는 모델을 돌리는 서버의 속도라 단계가 달라도 거의 같다(같은 모델 19쌍에서 중앙값 8% 차이).
+ *     그래서 단계를 고르지 않고, AA 가 잰 단계들의 출력 속도 평균을 쓴다.
  *   - 값이 비거나 0 인 모델도 뺀다. 빈칸을 기본값으로 채우지 않는다.
  *   - ECI 가 MIN_ECI 보다 낮은 모델은 팔지 않는다(판매 최소 품질 기준). 운영 판단으로 정한 값이다.
  * 뺀 모델은 이유와 함께 catalog.excluded 에 남긴다.
@@ -136,6 +137,18 @@ function aaBaseName(model) {
   return String(model.name ?? "").replace(/\s*\(.*?\)/g, "").trim();
 }
 
+function outputSpeed(model) {
+  return positiveDecimal(at(model, "performance.median_output_tokens_per_second"));
+}
+
+/** 같은 모델의 단계별 출력 속도 평균(소수점 둘째 자리). 값이 있는 단계만 센다. */
+function averageOutputSpeed(variants) {
+  const speeds = variants.map(outputSpeed).filter((value) => value !== null).map(Number);
+  if (speeds.length === 0) return null;
+  const mean = speeds.reduce((sum, value) => sum + value, 0) / speeds.length;
+  return String(Math.round(mean * 100) / 100);
+}
+
 function capabilitiesOf(model) {
   const parameters = Array.isArray(model.supported_parameters) ? model.supported_parameters : [];
   const inputs = Array.isArray(model.architecture?.input_modalities) ? model.architecture.input_modalities : [];
@@ -195,19 +208,9 @@ export function buildCatalog(epochRows, openRouterModels, aaModels, recipientOf,
       skip("OpenRouter 가격 없음 또는 0");
       continue;
     }
-    const variants = aa.get(key) ?? [];
+    const variants = (aa.get(key) ?? []).filter((item) => outputSpeed(item) !== null);
     if (variants.length === 0) {
-      skip("Artificial Analysis 에 같은 이름 없음");
-      continue;
-    }
-    const defaults = variants.filter((item) => /default/i.test(String(item.name)));
-    const picked = variants.length === 1 ? variants[0] : defaults.length === 1 ? defaults[0] : null;
-    if (picked === null) {
-      skip(`AA 생각 단계가 여러 개라 팔 단계 미정: ${variants.map((item) => item.name).join(", ")}`);
-      continue;
-    }
-    if (positiveDecimal(at(picked, "performance.median_end_to_end_response_time_seconds")) === null) {
-      skip("AA 응답시간 없음 또는 0");
+      skip((aa.get(key) ?? []).length === 0 ? "Artificial Analysis 에 같은 이름 없음" : "AA 출력 속도 없음 또는 0");
       continue;
     }
 
@@ -219,7 +222,7 @@ export function buildCatalog(epochRows, openRouterModels, aaModels, recipientOf,
       displayName: name,
       epochModel: name,
       openRouterId: listing.id,
-      aaSlug: String(picked.slug),
+      aaSlugs: variants.map((item) => String(item.slug)).sort(),
       recipient: recipientOf(providerId),
       capabilities: capabilitiesOf(listing),
     });
@@ -228,8 +231,8 @@ export function buildCatalog(epochRows, openRouterModels, aaModels, recipientOf,
   return {
     catalogVersion: `agent-m2m-${now.toISOString().slice(0, 10)}`,
     matching:
-      `ECI ${MIN_ECI} 이상이고, Epoch·OpenRouter·AA 이름(기호 제거, 소문자)이 정확히 같고, ` +
-      "AA 생각 단계가 하나이거나 Default 단계가 하나인 모델만",
+      `ECI ${MIN_ECI} 이상이고, Epoch·OpenRouter·AA 이름(기호 제거, 소문자)이 정확히 같은 모델만. ` +
+      "속도는 AA 가 잰 생각 단계들의 출력 속도 평균",
     entries,
     excluded,
   };
@@ -242,8 +245,9 @@ export function buildSnapshot(catalog, epochRows, openRouterModels, aaModels, no
     if (epoch === undefined) throw new Error(`Epoch 에 ${entry.epochModel} 가 없습니다`);
     const listing = openRouterModels.find((model) => model.id === entry.openRouterId);
     if (listing === undefined) throw new Error(`OpenRouter 에 ${entry.openRouterId} 가 없습니다`);
-    const aa = aaModels.find((model) => model.slug === entry.aaSlug);
-    if (aa === undefined) throw new Error(`AA 에 슬러그 ${entry.aaSlug} 가 없습니다`);
+    const variants = entry.aaSlugs.map((slug) => aaModels.find((model) => model.slug === slug));
+    const missingSlug = entry.aaSlugs.find((_, index) => variants[index] === undefined);
+    if (missingSlug !== undefined) throw new Error(`AA 에 슬러그 ${missingSlug} 가 없습니다`);
 
     const values = {
       eci: positiveDecimal(epoch.eci),
@@ -251,7 +255,7 @@ export function buildSnapshot(catalog, epochRows, openRouterModels, aaModels, no
       eciCiHigh: positiveDecimal(epoch.eci_ci_high),
       inputPricePerMillion: perMillion(at(listing, "pricing.prompt")),
       outputPricePerMillion: perMillion(at(listing, "pricing.completion")),
-      medianEndToEndSeconds: positiveDecimal(at(aa, "performance.median_end_to_end_response_time_seconds")),
+      outputTokensPerSecond: averageOutputSpeed(variants),
     };
     const missing = Object.entries(values).filter(([, value]) => value === null).map(([name]) => name);
     if (missing.length > 0) throw new Error(`${entry.key}: 값이 없습니다 (${missing.join(", ")})`);
@@ -262,8 +266,8 @@ export function buildSnapshot(catalog, epochRows, openRouterModels, aaModels, no
       epochDate: epoch.date,
       ...values,
       openRouterId: entry.openRouterId,
-      aaSlug: entry.aaSlug,
-      aaModelName: String(aa.name ?? entry.aaSlug),
+      aaSlugs: entry.aaSlugs,
+      aaModelNames: variants.map((model) => String(model.name)),
     };
   });
 
@@ -275,7 +279,7 @@ export function buildSnapshot(catalog, epochRows, openRouterModels, aaModels, no
     sources: { epoch: EPOCH_ECI_URL, openRouter: OPENROUTER_URL, aa: AA_URL },
     note:
       "성능은 Epoch Capabilities Index(95% 신뢰구간 포함), 가격은 OpenRouter 판매 단가, " +
-      "속도는 Artificial Analysis 가 잰 끝까지 걸린 시간의 최근 72시간 중앙값입니다.",
+      "속도는 Artificial Analysis 가 잰 출력 속도(토큰/초) 최근 72시간 중앙값을 생각 단계별로 평균낸 값입니다.",
     models,
   };
 }

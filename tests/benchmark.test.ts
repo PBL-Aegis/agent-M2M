@@ -57,7 +57,7 @@ function fakeSources(): ReturnType<typeof vi.fn> {
     const data = MODELS.map((model) => ({
       slug: model.aa,
       name: model.epoch,
-      performance: { median_end_to_end_response_time_seconds: 3 },
+      performance: { median_output_tokens_per_second: 100 },
     }));
     return new Response(JSON.stringify({ data }));
   });
@@ -67,7 +67,7 @@ describe("loadFreshSnapshot", () => {
   it("값이 1시간보다 오래되면 실패해도 마지막 값으로 계속하고 사유를 남긴다", async () => {
     globalThis.fetch = vi.fn(async () => new Response("down", { status: 503 })) as typeof fetch;
     const result = await loadFreshSnapshot();
-    expect(result.snapshot.snapshotId).toBe("test-fixture-v2");
+    expect(result.snapshot.snapshotId).toBe("test-fixture-v3");
     expect(result.refreshError).toMatch(/503/);
   });
 

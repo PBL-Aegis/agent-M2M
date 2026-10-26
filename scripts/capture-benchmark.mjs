@@ -63,7 +63,7 @@ console.log(`짝지어진 모델 ${catalog.entries.length}개 · 뺀 모델 ${ca
 for (const model of snapshot.models) {
   console.log(
     `  ${model.key}: ECI ${model.eci} (${model.eciCiLow}~${model.eciCiHigh}) · ` +
-      `$${model.inputPricePerMillion}/${model.outputPricePerMillion} · ${model.medianEndToEndSeconds}초 [${model.aaModelName}]`,
+      `$${model.inputPricePerMillion}/${model.outputPricePerMillion} · ${model.outputTokensPerSecond} 토큰/초 [${model.aaModelNames.join(", ")}]`,
   );
 }
 

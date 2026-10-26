@@ -10,9 +10,9 @@
  *
  * 세 점수는 각각 한 출처에서 오고, 모두 후보 중 가장 나쁜 값 0점·가장 좋은 값 100점으로 편다.
  *   가격 점수 = (log 최고 금액 − log 내 금액) ÷ (log 최고 − log 최저) × 100   (OpenRouter 판매 단가)
- *   속도 점수 = (log 최장 시간 − log 내 시간) ÷ (log 최장 − log 최단) × 100   (AA 72시간 중앙값)
+ *   속도 점수 = (log 내 출력 속도 − log 최저) ÷ (log 최고 − log 최저) × 100   (AA 출력 속도, 토큰/초)
  *   성능 점수 = (내 ECI − 최저 ECI) ÷ (최고 − 최저) × 100                    (Epoch ECI)
- * 가격과 시간은 후보끼리 수십~수백 배 차이 나서 로그로 편다. 그러면 2배 싼 것은 어느 가격대에서든 같은
+ * 가격과 속도는 후보끼리 몇 배~수십 배 차이 나서 로그로 편다. 그러면 2배 싼 것은 어느 가격대에서든 같은
  * 만큼 점수가 오르고, 아주 싼 모델 하나가 나머지를 0점 가까이로 누르거나(비율 방식) 아주 비싼 모델 하나에
  * 나머지가 끌려가는(직선 방식) 일이 줄어든다.
  * ECI 는 여러 벤치마크를 난이도까지 고려해 합친 지수라 0 이 "능력 없음"이 아니고 차이 자체가 의미를
@@ -84,9 +84,14 @@ export function eciScore(eci: number, minEci: number, maxEci: number): number {
   return maxEci === minEci ? 100 : ((eci - minEci) / (maxEci - minEci)) * 100;
 }
 
-/** 작을수록 좋은 값(금액·시간)을 로그로 바꿔 후보 중 최대 0점·최소 100점으로 편다. */
+/** 작을수록 좋은 값(금액)을 로그로 바꿔 후보 중 최대 0점·최소 100점으로 편다. */
 export function logLowerIsBetterScore(value: number, min: number, max: number): number {
   return max === min ? 100 : ((Math.log(max) - Math.log(value)) / (Math.log(max) - Math.log(min))) * 100;
+}
+
+/** 클수록 좋은 값(출력 속도)을 로그로 바꿔 후보 중 최소 0점·최대 100점으로 편다. */
+export function logHigherIsBetterScore(value: number, min: number, max: number): number {
+  return max === min ? 100 : ((Math.log(value) - Math.log(min)) / (Math.log(max) - Math.log(min))) * 100;
 }
 
 function round(value: number): number {
@@ -132,14 +137,18 @@ export function decide(
       // 한 출처라도 비면 기본값으로 메우지 않고 멈춘다. 빈칸을 채우면 점수가 조작된다.
       throw new SelectionError(`${entry.key}: Epoch ECI 가 없어 성능 점수를 만들 수 없습니다`);
     }
+    const outputTokensPerSecond = Number(metrics.outputTokensPerSecond);
+    if (!Number.isFinite(outputTokensPerSecond) || outputTokensPerSecond <= 0) {
+      throw new SelectionError(`${entry.key}: AA 출력 속도가 없어 속도 점수를 만들 수 없습니다`);
+    }
     return {
       entry,
       amountUnits: units,
-      completionMs: Number(metrics.medianEndToEndSeconds) * 1000,
+      outputTokensPerSecond,
       eci,
       eciCiLow: Number(metrics.eciCiLow),
       eciCiHigh: Number(metrics.eciCiHigh),
-      aaModelName: metrics.aaModelName,
+      aaModelNames: metrics.aaModelNames,
     };
   });
 
@@ -169,15 +178,17 @@ export function decide(
   // 3) 점수 — 기준값은 살아남은 후보에서만 뽑는다
   const minAmountUnits = Math.min(...eligible.map((item) => item.amountUnits));
   const maxAmountUnits = Math.max(...eligible.map((item) => item.amountUnits));
-  const minCompletionMs = Math.min(...eligible.map((item) => item.completionMs));
-  const maxCompletionMs = Math.max(...eligible.map((item) => item.completionMs));
+  const minOutputTokensPerSecond = Math.min(...eligible.map((item) => item.outputTokensPerSecond));
+  const maxOutputTokensPerSecond = Math.max(...eligible.map((item) => item.outputTokensPerSecond));
   const minEci = Math.min(...eligible.map((item) => item.eci));
   const maxEci = Math.max(...eligible.map((item) => item.eci));
   const weights = PRIORITY_WEIGHTS[request.priority];
 
   const scored = eligible.map((candidate) => {
     const priceScore = round(logLowerIsBetterScore(candidate.amountUnits, minAmountUnits, maxAmountUnits));
-    const timeScore = round(logLowerIsBetterScore(candidate.completionMs, minCompletionMs, maxCompletionMs));
+    const timeScore = round(
+      logHigherIsBetterScore(candidate.outputTokensPerSecond, minOutputTokensPerSecond, maxOutputTokensPerSecond),
+    );
     const intelligenceScore = round(eciScore(candidate.eci, minEci, maxEci));
     const totalScore = round(
       (priceScore * weights.price +
@@ -192,11 +203,11 @@ export function decide(
       providerModelId: candidate.entry.providerModelId,
       recipient: candidate.entry.recipient,
       amountUnits: candidate.amountUnits,
-      completionMs: candidate.completionMs,
+      outputTokensPerSecond: candidate.outputTokensPerSecond,
       eci: candidate.eci,
       eciCiLow: candidate.eciCiLow,
       eciCiHigh: candidate.eciCiHigh,
-      aaModelName: candidate.aaModelName,
+      aaModelNames: candidate.aaModelNames,
       priceScore,
       timeScore,
       intelligenceScore,
@@ -205,11 +216,13 @@ export function decide(
     } satisfies ScoredCandidate;
   });
 
-  // 4) 순위 — 총점이 같으면 금액, 완료시간, Provider 이름, 모델 id 순. 무작위는 없다.
+  // 4) 순위 — 총점이 같으면 금액, 출력 속도, Provider 이름, 모델 id 순. 무작위는 없다.
   scored.sort((left, right) => {
     if (left.totalScore !== right.totalScore) return right.totalScore - left.totalScore;
     if (left.amountUnits !== right.amountUnits) return left.amountUnits - right.amountUnits;
-    if (left.completionMs !== right.completionMs) return left.completionMs - right.completionMs;
+    if (left.outputTokensPerSecond !== right.outputTokensPerSecond) {
+      return right.outputTokensPerSecond - left.outputTokensPerSecond;
+    }
     if (left.providerId !== right.providerId) return left.providerId < right.providerId ? -1 : 1;
     return left.providerModelId < right.providerModelId ? -1 : 1;
   });
@@ -227,11 +240,18 @@ export function decide(
     estimatedInputTokens: inputTokens,
     maxOutputTokens,
     budgetUnits: request.budgetUnits,
-    references: { minAmountUnits, maxAmountUnits, minCompletionMs, maxCompletionMs, minEci, maxEci },
+    references: {
+      minAmountUnits,
+      maxAmountUnits,
+      minOutputTokensPerSecond,
+      maxOutputTokensPerSecond,
+      minEci,
+      maxEci,
+    },
     performanceSources: {
       performance: "Epoch Capabilities Index (95% 신뢰구간)",
       price: "OpenRouter 판매 단가",
-      speed: "Artificial Analysis 끝까지 걸린 시간, 최근 72시간 중앙값",
+      speed: "Artificial Analysis 출력 속도(토큰/초), 최근 72시간 중앙값의 생각 단계별 평균",
       combine: "가격·속도는 로그로, 성능(ECI)은 그대로 후보 중 가장 나쁜 값 0점·가장 좋은 값 100점으로 폄",
     },
     candidates: scored,

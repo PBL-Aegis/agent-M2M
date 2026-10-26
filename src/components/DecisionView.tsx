@@ -11,9 +11,11 @@ function fmt(value: number): string {
   return value.toLocaleString("ko-KR");
 }
 
-/** ms → 초. 112,590ms처럼 긴 숫자 대신 113초로 보여준다. */
-function seconds(ms: number): string {
-  return `${Math.round(ms / 1000)}`;
+/** 새 기록은 출력 속도(토큰/초), 옛 기록은 끝까지 걸린 시간(초)을 보여준다. */
+function speed(candidate: { outputTokensPerSecond?: number; completionMs?: number }): string {
+  if (candidate.outputTokensPerSecond !== undefined) return `${Math.round(candidate.outputTokensPerSecond)} 토큰/초`;
+  if (candidate.completionMs !== undefined) return `${Math.round(candidate.completionMs / 1000)}초`;
+  return "-";
 }
 
 function score(value: number): string {
@@ -100,7 +102,7 @@ export function CandidateTables({ record }: { record: PurchaseRecord }) {
               <th className="num">순위</th>
               <th>모델</th>
               <th className="num">금액 (AEGIS)</th>
-              <th className="num">완료 (초)</th>
+              <th className="num">속도</th>
               <th className="num">가격 점수</th>
               <th className="num">속도 점수</th>
               <th className="num">성능 점수</th>
@@ -113,7 +115,7 @@ export function CandidateTables({ record }: { record: PurchaseRecord }) {
                 <td className="num">{candidate.rank}</td>
                 <td>{candidate.displayName}</td>
                 <td className="num">{toAegis(candidate.amountUnits)}</td>
-                <td className="num">{seconds(candidate.completionMs)}</td>
+                <td className="num">{speed(candidate)}</td>
                 <td className="num">{score(candidate.priceScore)}</td>
                 <td className="num">{score(candidate.timeScore)}</td>
                 <td className="num">{score(candidate.intelligenceScore)}</td>
@@ -129,8 +131,9 @@ export function CandidateTables({ record }: { record: PurchaseRecord }) {
           <h2>점수 근거 · 세 출처</h2>
           <p className="muted">
             성능은 Epoch Capabilities Index(여러 벤치마크를 난이도까지 고려해 합친 지수), 가격은 OpenRouter 판매 단가,
-            속도는 Artificial Analysis가 잰 끝까지 걸린 시간의 최근 72시간 중앙값입니다. 세 점수 모두 후보 중 가장 나쁜
-            값을 0점, 가장 좋은 값을 100점으로 폈고, 가격과 속도는 몇 배 차이인지가 반영되도록 로그로 폈습니다.
+            속도는 Artificial Analysis가 잰 출력 속도(1초에 내보내는 토큰 수)를 생각 단계별로 평균낸 값입니다. 세 점수 모두
+            후보 중 가장 나쁜 값을 0점, 가장 좋은 값을 100점으로 폈고, 가격과 속도는 몇 배 차이인지가 반영되도록 로그로
+            폈습니다.
           </p>
           <div className="table-wrap">
             <table>
@@ -140,7 +143,7 @@ export function CandidateTables({ record }: { record: PurchaseRecord }) {
                   <th className="num">ECI</th>
                   <th className="num">95% 신뢰구간</th>
                   <th className="num">성능 점수</th>
-                  <th>속도 측정 조건 (AA)</th>
+                  <th>속도를 잰 AA 항목</th>
                 </tr>
               </thead>
               <tbody>
@@ -152,7 +155,7 @@ export function CandidateTables({ record }: { record: PurchaseRecord }) {
                       {candidate.eciCiLow}~{candidate.eciCiHigh}
                     </td>
                     <td className="num">{score(candidate.intelligenceScore)}</td>
-                    <td>{candidate.aaModelName ?? "-"}</td>
+                    <td>{candidate.aaModelNames?.join(", ") ?? candidate.aaModelName ?? "-"}</td>
                   </tr>
                 ))}
               </tbody>
