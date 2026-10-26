@@ -80,7 +80,7 @@ export function PurchaseSummary({ record }: { record: PurchaseRecord }) {
   );
 }
 
-/** 점수가 없는 옛 기록(두 출처 도입 전)도 깨지지 않게 보여준다. */
+/** 옛 기록(AA·Arena 시절)에만 있는 점수도 깨지지 않게 보여준다. */
 function maybe(value: number | undefined): string {
   return value === undefined ? "-" : score(value);
 }
@@ -124,39 +124,80 @@ export function CandidateTables({ record }: { record: PurchaseRecord }) {
         </table>
       </div>
 
-      <h2>성능 점수 내역 · 두 출처</h2>
-      {sources === undefined ? (
-        <p className="muted">이 기록은 두 출처를 합치기 전에 만들어져 AA 지능 지수 하나로 계산했습니다.</p>
-      ) : (
+      {decision.candidates.every((candidate) => candidate.eci !== undefined) ? (
         <>
+          <h2>점수 근거 · 세 출처</h2>
           <p className="muted">
-            성능 점수 = (AA 점수 + Arena 점수) ÷ 2. 원래 값을 후보 중 최고 대비 100점 만점으로 바꿨습니다
-            {sources.arenaPublishDate !== null && <> · Arena 발행일 {sources.arenaPublishDate}</>}.
+            성능은 Epoch Capabilities Index(여러 벤치마크를 난이도까지 고려해 합친 지수), 가격은 OpenRouter 판매 단가,
+            속도는 Artificial Analysis가 잰 끝까지 걸린 시간의 최근 72시간 중앙값입니다. 세 점수 모두 후보 중 가장 나쁜
+            값을 0점, 가장 좋은 값을 100점으로 폈고, 가격과 속도는 몇 배 차이인지가 반영되도록 로그로 폈습니다.
           </p>
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
                   <th>모델</th>
-                  <th className="num">AA 지능 지수</th>
-                  <th className="num">AA 점수</th>
-                  <th className="num">Arena Elo</th>
-                  <th className="num">Arena 점수</th>
+                  <th className="num">ECI</th>
+                  <th className="num">95% 신뢰구간</th>
+                  <th className="num">성능 점수</th>
+                  <th>속도 측정 조건 (AA)</th>
                 </tr>
               </thead>
               <tbody>
                 {decision.candidates.map((candidate) => (
                   <tr key={candidate.key}>
                     <td>{candidate.displayName}</td>
-                    <td className="num">{candidate.intelligenceIndex}</td>
-                    <td className="num">{maybe(candidate.aaScore)}</td>
-                    <td className="num">{candidate.arenaRating === undefined ? "-" : fmt(Math.round(candidate.arenaRating))}</td>
-                    <td className="num">{maybe(candidate.arenaScore)}</td>
+                    <td className="num">{candidate.eci}</td>
+                    <td className="num">
+                      {candidate.eciCiLow}~{candidate.eciCiHigh}
+                    </td>
+                    <td className="num">{score(candidate.intelligenceScore)}</td>
+                    <td>{candidate.aaModelName ?? "-"}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+        </>
+      ) : (
+        <>
+          <h2>성능 점수 내역 · 두 출처</h2>
+          {sources?.arena === undefined ? (
+            <p className="muted">이 기록은 두 출처를 합치기 전에 만들어져 AA 지능 지수 하나로 계산했습니다.</p>
+          ) : (
+            <>
+              <p className="muted">
+                성능 점수 = (AA 점수 + Arena 점수) ÷ 2. 원래 값을 후보 중 최고 대비 100점 만점으로 바꿨습니다
+                {sources.arenaPublishDate != null && <> · Arena 발행일 {sources.arenaPublishDate}</>}.
+              </p>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>모델</th>
+                      <th className="num">AA 지능 지수</th>
+                      <th className="num">AA 점수</th>
+                      <th className="num">Arena Elo</th>
+                      <th className="num">Arena 점수</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {decision.candidates.map((candidate) => (
+                      <tr key={candidate.key}>
+                        <td>{candidate.displayName}</td>
+                        <td className="num">{candidate.intelligenceIndex ?? "-"}</td>
+                        <td className="num">{maybe(candidate.aaScore)}</td>
+                        <td className="num">
+                          {candidate.arenaRating === undefined ? "-" : fmt(Math.round(candidate.arenaRating))}
+                        </td>
+                        <td className="num">{maybe(candidate.arenaScore)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
         </>
       )}
 

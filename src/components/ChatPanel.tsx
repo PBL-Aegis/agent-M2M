@@ -15,10 +15,15 @@ import { toAegis, toUnits } from "@/lib/format";
 import { PRIORITY_LABEL } from "@/lib/priority-label";
 import { PRIORITIES, type PurchaseRecord } from "@/lib/types";
 
-const PRIORITY_OPTIONS = PRIORITIES.map((value) => ({
-  value,
-  label: PRIORITY_LABEL[value],
-}));
+/**
+ * "기본"은 고르는 값이 아니다. 비워 두면 요청 문장을 읽어 우선순위를 정하고,
+ * 문장에 선호가 없거나 서로 부딪힐 때만 기본 비중을 쓴다.
+ */
+const AUTO = "";
+const PRIORITY_OPTIONS = [
+  { value: AUTO, label: "요청 문장으로 판단" },
+  ...PRIORITIES.filter((value) => value !== "default").map((value) => ({ value, label: PRIORITY_LABEL[value] })),
+];
 
 interface Turn {
   id: number;
@@ -30,7 +35,7 @@ interface Turn {
 export function ChatPanel() {
   const [prompt, setPrompt] = useState("");
   const [budget, setBudget] = useState("0.3");
-  const [priority, setPriority] = useState<string>("default");
+  const [priority, setPriority] = useState<string>(AUTO);
   const [busy, setBusy] = useState(false);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [open, setOpen] = useState<number | null>(null);
@@ -50,7 +55,7 @@ export function ChatPanel() {
       const response = await fetch("/api/purchase", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ prompt: text, budgetUnits, priority }),
+        body: JSON.stringify({ prompt: text, budgetUnits, ...(priority === AUTO ? {} : { priority }) }),
       });
       const body = (await response.json()) as PurchaseRecord | { error: string };
       setTurns((prev) =>

@@ -5,7 +5,7 @@
  * 같이 만들어 두고, 결정 기록에 그 지문을 남긴다. 나중에 같은 계산을 다시 해볼 때
  * "그때 본 숫자"가 무엇이었는지 확인할 수 있다.
  *
- * 구매 때는 loadFreshSnapshot 을 쓴다. 가장 최근 값이 1시간보다 오래됐으면 두 출처에서 새로 받아
+ * 구매 때는 loadFreshSnapshot 을 쓴다. 가장 최근 값이 1시간보다 오래됐으면 세 출처(Epoch·OpenRouter·AA)에서 새로 받아
  * MongoDB 에 쌓고, 받다가 실패하면 마지막 값으로 계속하면서 실패 사유를 결정 기록에 남긴다.
  * data/benchmark.json 은 한 번도 받지 않았을 때 쓰는 시작값이다.
  */
@@ -14,7 +14,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
-import { buildSnapshot, fetchAa, fetchArena } from "./benchmark-sources.mjs";
+import { buildSnapshot, fetchAa, fetchEpoch, fetchOpenRouter } from "./benchmark-sources.mjs";
 import { latestSnapshot, saveSnapshot } from "./store";
 import type { BenchmarkModel, BenchmarkSnapshot, Catalog, CatalogEntry } from "./types";
 
@@ -55,8 +55,8 @@ let refreshing: Promise<{ snapshot: BenchmarkSnapshot; hash: string }> | null = 
 async function refresh(): Promise<{ snapshot: BenchmarkSnapshot; hash: string }> {
   const key = process.env.AA_API_KEY?.trim();
   if (key === undefined || key === "") throw new Error("AA_API_KEY 가 없습니다");
-  const [aaModels, arena] = await Promise.all([fetchAa(key), fetchArena()]);
-  const snapshot = buildSnapshot(loadCatalog(), aaModels, arena);
+  const [epochRows, openRouterModels, aaModels] = await Promise.all([fetchEpoch(), fetchOpenRouter(), fetchAa(key)]);
+  const snapshot = buildSnapshot(loadCatalog(), epochRows, openRouterModels, aaModels);
   const hash = snapshotHash(snapshot);
   await saveSnapshot(hash, snapshot);
   return { snapshot, hash };

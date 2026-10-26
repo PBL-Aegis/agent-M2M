@@ -19,55 +19,66 @@ export interface Weights {
 
 /** 우선순위마다 고정된 배점표. 코드 밖에서 바꿀 수 없다. */
 export const PRIORITY_WEIGHTS: Record<Priority, Weights> = {
-  default: { price: 40, time: 30, intelligence: 30 },
-  price: { price: 60, time: 20, intelligence: 20 },
-  speed: { price: 20, time: 60, intelligence: 20 },
-  intelligence: { price: 20, time: 20, intelligence: 60 },
+  default: { price: 34, time: 33, intelligence: 33 },
+  price: { price: 80, time: 10, intelligence: 10 },
+  speed: { price: 10, time: 80, intelligence: 10 },
+  intelligence: { price: 10, time: 10, intelligence: 80 },
 };
 
-/** 팔고 있는 모델 하나. 수신자 주소는 이 파일이 아니라 data/catalog.json에 적혀 있다. */
+/**
+ * 팔고 있는 모델 하나. data/catalog.json 은 scripts/capture-benchmark.mjs 가 세 출처를 짝지어 만든다.
+ * 수신자 주소는 회사별 판매자 주소(data/sellers.json)다.
+ */
 export interface CatalogEntry {
+  /** OpenRouter 모델 id. 예: anthropic/claude-opus-5.5 */
   key: string;
-  /** 벤치마크를 다시 뜰 때 쓰는 Artificial Analysis 슬러그. */
-  aaSlug?: string;
-  /** LMArena 리더보드의 정확한 모델 이름. 추측으로 찾지 않고 이 이름으로만 찾는다. */
-  arenaModel?: string;
-  /** 두 출처가 각각 어느 노력 수준을 쟀는지 사람이 적어 둔 설명. */
-  effortPairing?: string;
   providerId: string;
   providerModelId: string;
   displayName: string;
+  /** Epoch ECI 표의 모델 이름. */
+  epochModel: string;
+  openRouterId: string;
+  /** 속도를 가져온 Artificial Analysis 항목(생각 단계까지 정해진 것). */
+  aaSlug: string;
   recipient: string;
+  /** OpenRouter 가 알려 준 기능: reasoning, tools, vision */
   capabilities: string[];
 }
 
 export interface Catalog {
   catalogVersion: string;
+  /** 짝짓기 규칙. */
+  matching?: string;
   entries: CatalogEntry[];
+  /** 짝을 찾지 못해 팔지 않는 모델과 그 이유. */
+  excluded?: { name: string; reason: string }[];
 }
 
 /** 벤치마크 표의 한 줄. 숫자는 문자열로 둔다(소수점 오차를 만들지 않기 위해). */
 export interface BenchmarkModel {
   key: string;
-  /** 이 줄이 어느 Artificial Analysis 항목에서 왔는지. */
-  aaSlug?: string;
-  aaModelName?: string;
+  epochModel: string;
+  /** Epoch 가 이 모델의 ECI 를 낸 기준 날짜. */
+  epochDate?: string;
+  /** Epoch Capabilities Index 와 95% 신뢰구간. */
+  eci: string;
+  eciCiLow: string;
+  eciCiHigh: string;
+  /** OpenRouter 판매 단가(1M 토큰당 달러). */
   inputPricePerMillion: string;
   outputPricePerMillion: string;
+  /** AA 가 잰 끝까지 걸린 시간(초)의 최근 72시간 중앙값. */
   medianEndToEndSeconds: string;
-  intelligenceIndex: string;
-  /** LMArena 사람 선호 Elo. 성능 점수의 두 번째 출처다. */
-  arenaModel: string;
-  arenaRating: string;
-  arenaVotes?: number;
+  openRouterId: string;
+  aaSlug: string;
+  aaModelName: string;
 }
 
 export interface BenchmarkSnapshot {
   snapshotId: string;
   capturedAt: string;
   source: string;
-  sourceUrl?: string;
-  arena?: { dataset: string; category: string; publishDate: string };
+  sources?: { epoch: string; openRouter: string; aa: string };
   note: string;
   models: BenchmarkModel[];
 }
@@ -115,17 +126,22 @@ export interface ScoredCandidate {
   recipient: string;
   amountUnits: number;
   completionMs: number;
-  intelligenceIndex: number;
-  arenaModel: string;
-  arenaRating: number;
-  effortPairing: string;
+  /** Epoch ECI 와 95% 신뢰구간. 이 칸들이 생기기 전 기록에는 없다. */
+  eci?: number;
+  eciCiLow?: number;
+  eciCiHigh?: number;
+  /** 속도를 가져온 AA 항목 이름(생각 단계 포함). */
+  aaModelName?: string;
+  /** 옛 기록(AA 지능 지수 + LMArena)에만 있는 칸. */
+  intelligenceIndex?: number;
+  arenaModel?: string;
+  arenaRating?: number;
+  effortPairing?: string;
+  aaScore?: number;
+  arenaScore?: number;
   priceScore: number;
   timeScore: number;
-  /** AA 지능 지수를 후보 안에서 100점 만점으로 바꾼 값. */
-  aaScore: number;
-  /** Arena Elo를 "1등 후보와 붙었을 때 이길 확률"로 바꿔 100점 만점으로 만든 값. */
-  arenaScore: number;
-  /** 성능 점수 = (aaScore + arenaScore) / 2. 가중치의 "성능" 칸에 들어간다. */
+  /** 성능 점수. 새 기록은 ECI 를 후보 중 최저 0점·최고 100점으로 편 값이다. 가중치의 "성능" 칸에 들어간다. */
   intelligenceScore: number;
   totalScore: number;
   rank: number;
@@ -151,15 +167,24 @@ export interface Decision {
   budgetUnits: number;
   references: {
     minAmountUnits: number;
+    /** 가격·속도를 로그로 펴기 시작한 뒤의 기록에만 있다. */
+    maxAmountUnits?: number;
     minCompletionMs: number;
-    maxIntelligenceIndex: number;
-    maxArenaRating: number;
+    maxCompletionMs?: number;
+    minEci?: number;
+    maxEci?: number;
+    /** 옛 기록에만 있다. */
+    maxIntelligenceIndex?: number;
+    maxArenaRating?: number;
   };
-  /** 성능 점수를 만든 출처와 각 출처의 기준 시점. */
-  performanceSources: {
-    aa: string;
-    arena: string;
-    arenaPublishDate: string | null;
+  /** 점수를 만든 출처와 계산 방법. 옛 기록은 aa·arena 칸을 쓴다. */
+  performanceSources?: {
+    performance?: string;
+    price?: string;
+    speed?: string;
+    aa?: string;
+    arena?: string;
+    arenaPublishDate?: string | null;
     combine: string;
   };
   candidates: ScoredCandidate[];

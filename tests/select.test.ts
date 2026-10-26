@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { amountUnits, arenaWinScore, decide, SelectionError } from "../src/lib/select";
+import { amountUnits, decide, eciScore, logLowerIsBetterScore, SelectionError } from "../src/lib/select";
 
 /** 400 입력 토큰이 나오도록 1600 바이트짜리 ASCII 요청을 만든다(4바이트 = 1토큰 어림). */
 const PROMPT_400 = "a".repeat(1600);
@@ -19,32 +19,32 @@ describe("amountUnits", () => {
 });
 
 describe("decide", () => {
-  it("세 후보가 모두 예산 안이면 기본 우선순위는 Gemini 2.5 Flash 를 고른다", () => {
+  it("세 후보가 모두 예산 안이면 기본 우선순위는 테스트 Google 을 고른다", () => {
     const decision = decide({ prompt: PROMPT_400, budgetUnits: 50_000, priority: "default" });
     expect(decision.estimatedInputTokens).toBe(400);
     expect(decision.candidates).toHaveLength(3);
     expect(decision.rejected).toHaveLength(0);
-    expect(decision.winner.key).toBe("google:test-flash");
+    expect(decision.winner.key).toBe("google/test-flash");
     expect(decision.winner.amountUnits).toBe(20120);
-    expect(decision.weights).toEqual({ price: 40, time: 30, intelligence: 30 });
+    expect(decision.weights).toEqual({ price: 34, time: 33, intelligence: 33 });
   });
 
-  it("가격 우선이면 GPT-4.1 mini 를 고른다", () => {
+  it("가격 우선이면 테스트 OpenAI 를 고른다", () => {
     const decision = decide({ prompt: PROMPT_400, budgetUnits: 50_000, priority: "price" });
-    expect(decision.winner.key).toBe("openai:test-mini");
+    expect(decision.winner.key).toBe("openai/test-mini");
     expect(decision.winner.amountUnits).toBe(12960);
-    expect(decision.weights).toEqual({ price: 60, time: 20, intelligence: 20 });
+    expect(decision.weights).toEqual({ price: 80, time: 10, intelligence: 10 });
   });
 
-  it("reasoning 기능을 요구하면 Google 후보는 사유와 함께 탈락한다", () => {
+  it("reasoning 기능을 요구하면 테스트 Google 은 사유와 함께 탈락한다", () => {
     const decision = decide({
       prompt: PROMPT_400,
       budgetUnits: 50_000,
       priority: "default",
       requiredCapabilities: ["reasoning"],
     });
-    expect(decision.candidates.map((item) => item.key)).not.toContain("google:test-flash");
-    const google = decision.rejected.find((item) => item.key === "google:test-flash");
+    expect(decision.candidates.map((item) => item.key)).not.toContain("google/test-flash");
+    const google = decision.rejected.find((item) => item.key === "google/test-flash");
     expect(google).toBeDefined();
     expect(google!.reasons).toEqual(["필요 기능 없음: reasoning"]);
   });
@@ -56,30 +56,34 @@ describe("decide", () => {
   });
 });
 
-describe("두 출처 성능 점수", () => {
-  it("Arena 점수는 1등 대비 승률로 환산한다 — 1등 100점, 400점 낮으면 약 18점", () => {
-    expect(arenaWinScore(1500, 1500)).toBeCloseTo(100, 6);
-    expect(arenaWinScore(1100, 1500)).toBeCloseTo(200 / 11, 6);
+describe("Epoch ECI 성능 점수", () => {
+  it("ECI 는 후보 중 최저 0점·최고 100점으로 편다. 후보가 하나면 100점이다", () => {
+    expect(eciScore(160, 140, 160)).toBe(100);
+    expect(eciScore(140, 140, 160)).toBe(0);
+    expect(eciScore(150, 140, 160)).toBe(50);
+    expect(eciScore(150, 150, 150)).toBe(100);
   });
 
-  it("성능 점수는 AA 점수와 Arena 점수의 평균이다", () => {
+  it("성능 점수에 ECI·신뢰구간·속도 측정 조건을 남긴다", () => {
     const decision = decide({ prompt: PROMPT_400, budgetUnits: 50_000, priority: "intelligence" });
-    for (const candidate of decision.candidates) {
-      expect(candidate.intelligenceScore).toBeCloseTo((candidate.aaScore + candidate.arenaScore) / 2, 5);
-    }
-    // 픽스처에서 Arena 1등은 1450점짜리 Anthropic 테스트 모델이다.
-    const top = decision.candidates.find((item) => item.key === "anthropic:test-haiku")!;
-    expect(top.arenaScore).toBeCloseTo(100, 6);
-    expect(decision.references.maxArenaRating).toBe(1450);
+    const haiku = decision.candidates.find((item) => item.key === "anthropic/test-haiku")!;
+    expect(haiku.intelligenceScore).toBe(100);
+    expect(haiku.eci).toBe(160);
+    expect([haiku.eciCiLow, haiku.eciCiHigh]).toEqual([157, 163]);
+    expect(haiku.aaModelName).toBe("Test Haiku");
+    expect(decision.references.minEci).toBe(140);
+    expect(decision.references.maxEci).toBe(160);
+    const flash = decision.candidates.find((item) => item.key === "google/test-flash")!;
+    expect(flash.intelligenceScore).toBe(50);
   });
 
-  it("Arena 점수가 빠진 모델이 있으면 기본값으로 메우지 않고 멈춘다", () => {
+  it("ECI 가 빠진 모델이 있으면 기본값으로 메우지 않고 멈춘다", () => {
     const fixtures = path.join(import.meta.dirname, "fixtures");
     const dir = mkdtempSync(path.join(tmpdir(), "agent-m2m-"));
     cpSync(fixtures, dir, { recursive: true });
     const file = path.join(dir, "benchmark.json");
     const snapshot = JSON.parse(readFileSync(file, "utf8"));
-    delete snapshot.models[0].arenaRating;
+    delete snapshot.models[0].eci;
     writeFileSync(file, JSON.stringify(snapshot));
     const previous = process.env.AGENT_M2M_DATA_DIR;
     process.env.AGENT_M2M_DATA_DIR = dir;
@@ -90,5 +94,24 @@ describe("두 출처 성능 점수", () => {
     } finally {
       process.env.AGENT_M2M_DATA_DIR = previous;
     }
+  });
+});
+
+describe("가격·속도 로그 점수", () => {
+  it("가장 싼 값 100점, 가장 비싼 값 0점이고, 2배 차이는 어느 구간에서든 같은 점수 차이다", () => {
+    expect(logLowerIsBetterScore(1, 1, 8)).toBe(100);
+    expect(logLowerIsBetterScore(8, 1, 8)).toBeCloseTo(0, 9);
+    const step1 = logLowerIsBetterScore(1, 1, 8) - logLowerIsBetterScore(2, 1, 8);
+    const step2 = logLowerIsBetterScore(4, 1, 8) - logLowerIsBetterScore(8, 1, 8);
+    expect(step1).toBeCloseTo(step2, 9);
+    expect(logLowerIsBetterScore(5, 5, 5)).toBe(100);
+  });
+
+  it("가격 우선에서 가장 싼 후보 100점, 가장 비싼 후보 0점, 중간은 로그 위치대로다", () => {
+    const decision = decide({ prompt: PROMPT_400, budgetUnits: 50_000, priority: "price" });
+    const score = (key: string) => decision.candidates.find((item) => item.key === key)!.priceScore;
+    expect(score("openai/test-mini")).toBe(100);
+    expect(score("anthropic/test-haiku")).toBe(0);
+    expect(score("google/test-flash")).toBeCloseTo(61.31, 1);
   });
 });

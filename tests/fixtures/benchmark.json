@@ -1,47 +1,47 @@
 {
-  "snapshotId": "test-fixture-v1",
+  "snapshotId": "test-fixture-v2",
   "capturedAt": "2026-01-01T00:00:00Z",
   "source": "fixture",
-  "sourceUrl": "",
   "note": "계산 검증용 고정 숫자. 실제 벤치마크 값이 아니다.",
   "models": [
     {
-      "key": "openai:test-mini",
-      "aaSlug": "test-mini",
-      "aaModelName": "테스트 OpenAI",
+      "key": "openai/test-mini",
+      "epochModel": "Test Mini",
+      "eci": "140",
+      "eciCiLow": "137.5",
+      "eciCiHigh": "142.5",
       "inputPricePerMillion": "0.4",
       "outputPricePerMillion": "1.6",
       "medianEndToEndSeconds": "8.4",
-      "intelligenceIndex": "41.5",
-      "arenaModel": "test-mini-arena",
-      "arenaRating": "1400"
+      "openRouterId": "openai/test-mini",
+      "aaSlug": "test-mini",
+      "aaModelName": "Test Mini"
     },
     {
-      "key": "anthropic:test-haiku",
-      "aaSlug": "test-haiku",
-      "aaModelName": "테스트 Anthropic",
+      "key": "anthropic/test-haiku",
+      "epochModel": "Test Haiku",
+      "eci": "160",
+      "eciCiLow": "157",
+      "eciCiHigh": "163",
       "inputPricePerMillion": "1",
       "outputPricePerMillion": "5",
       "medianEndToEndSeconds": "12.5",
-      "intelligenceIndex": "55.2",
-      "arenaModel": "test-haiku-arena",
-      "arenaRating": "1450"
+      "openRouterId": "anthropic/test-haiku",
+      "aaSlug": "test-haiku",
+      "aaModelName": "Test Haiku"
     },
     {
-      "key": "google:test-flash",
-      "aaSlug": "test-flash",
-      "aaModelName": "테스트 Google",
+      "key": "google/test-flash",
+      "epochModel": "Test Flash",
+      "eci": "150",
+      "eciCiLow": "148",
+      "eciCiHigh": "152",
       "inputPricePerMillion": "0.3",
       "outputPricePerMillion": "2.5",
       "medianEndToEndSeconds": "4.75",
-      "intelligenceIndex": "48",
-      "arenaModel": "test-flash-arena",
-      "arenaRating": "1425"
+      "openRouterId": "google/test-flash",
+      "aaSlug": "test-flash",
+      "aaModelName": "Test Flash"
     }
-  ],
-  "arena": {
-    "dataset": "fixture",
-    "category": "overall",
-    "publishDate": "2026-01-01"
-  }
+  ]
 }
