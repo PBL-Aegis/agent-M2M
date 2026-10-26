@@ -27,16 +27,169 @@ AI 구매 에이전트가 벤치마크 표를 보고 모델 하나를 고른 뒤
 | `/dashboard/purchases` | 전체 요청·결제 기록 |
 | `/dashboard/[id]` | 기록 한 건의 결정 근거 |
 
-## 실행
+## 처음 시작하기
+
+### 1. 설치할 것
+
+| 도구 | 쓰는 곳 | 꼭 필요한가 |
+| --- | --- | --- |
+| Node.js 22 | 앱 실행·테스트 | 필요 |
+| MongoDB | 구매 기록 저장. 자동 테스트도 임시 DB를 만들어 씀 | 필요 |
+| [Foundry](https://getfoundry.sh) (`forge`, `anvil`) | 컨트랙트 빌드·테스트, 로컬 체인 | 필요 |
+| [Ollama](https://ollama.com) + `qwen3.5:4b` | 우선순위를 비운 요청에서 요청 문장을 읽고 우선순위를 정함 | 선택 |
+
+### 2. 받고 준비하기
 
 ```bash
+git clone git@github.com:codenameVien/agent-M2M.git
+cd agent-M2M
+git submodule update --init --recursive   # 컨트랙트 라이브러리(OpenZeppelin, forge-std)
 npm install
-npm run chain      # 로컬 체인(anvil)을 띄우고 토큰 배포·발급. 켜 둔 채로 다른 창에서 다음 명령
-npm run dev        # http://localhost:3100
-npm test           # vitest
+cp .env.example .env.local                # 값은 .env.local 에만 넣는다
+```
+
+`.env.local` 은 그대로 두어도 로컬 체인으로 돌아갑니다. 판매 목록을 다시 만들 때만 `AA_API_KEY` 가 필요합니다.
+
+### 3. 실행하기
+
+```bash
+npm run chain      # 창 1: 로컬 체인(anvil)을 띄우고 토큰 배포·구매자에게 1000 AEGIS 발급. 켜 둔다
+npm run dev        # 창 2: http://localhost:3100
+```
+
+MongoDB 가 꺼져 있으면 먼저 켭니다(아래 "기록 저장소").
+
+### 4. Ollama 는 언제 필요한가
+
+요청에 우선순위(`price`·`speed`·`intelligence`)가 **없을 때만** 씁니다. 이때 Qwen 이 요청 문장을 읽고 우선순위를 스스로 정하고, 문장에 선호가 없거나 서로 부딪히면 **기본 비중(34·33·33)** 을 씁니다(아래 "벤치마크와 판매 모델"의 비중표). 채팅 화면의 처음 값 "요청 문장으로 판단"이 이 경우입니다.
+
+```bash
+ollama pull qwen3.5:4b    # 한 번만. 약 3.3GB
+```
+
+우선순위를 넣어 보내면 Ollama 없이도 모든 기능이 돌아갑니다. Ollama 가 꺼진 채 우선순위를 비워 보내면 결제 전에 멈춥니다(503).
+
+### 5. 확인 명령
+
+```bash
+npm test                    # 서버 자동 테스트 (vitest)
 npm run typecheck
 npm run build
+cd contracts && forge test  # 컨트랙트 테스트
 ```
+
+## 요청 보내기
+
+화면 대신 에이전트처럼 API 로 보낼 수 있습니다. `budgetUnits` 는 최소 단위(1 AEGIS = 1,000,000 units)입니다.
+
+```bash
+# 우선순위를 직접 정해 보냄. Ollama 필요 없음
+curl -s -X POST localhost:3100/api/purchase -H 'content-type: application/json' \
+  -d '{"prompt":"이 글 요약해 줘","budgetUnits":500000,"priority":"price","requestId":"req-001","userId":"user-a"}'
+
+# 우선순위를 비움. Qwen 이 문장("급해")을 읽고 speed 로 정함
+curl -s -X POST localhost:3100/api/purchase -H 'content-type: application/json' \
+  -d '{"prompt":"급해, 빨리 이 글 요약해 줘","budgetUnits":500000}'
+```
+
+| 필드 | 필수 | 뜻 |
+| --- | --- | --- |
+| `prompt` | 예 | 요청 문장 |
+| `budgetUnits` | 예 | 예산(0 이상 정수). 선택에서 거르지는 않고 기록에 남김 |
+| `priority` | 아니오 | `price`·`speed`·`intelligence`·`default`. 비우면 Qwen 이 정함 |
+| `requestId` | 아니오 | 요청 번호. 같은 요청을 다시 보낼 때 같은 값. 비우면 서버가 만듦 |
+| `userId` | 아니오 | 요청한 사용자 |
+| `maxOutputTokens` | 아니오 | 최대 출력 토큰(기본 8000). 금액 계산에 씀 |
+| `requiredCapabilities` | 아니오 | `reasoning`·`tools`·`vision` 중 필요한 것 |
+
+| 응답 | 언제 | 기록 |
+| --- | --- | --- |
+| 200 + 기록(`status: SETTLED`) | 결제와 확인까지 성공 | 남음 |
+| 200 + 기록(`status: FAILED`) | 송금 직전 감사 규칙이 막음, 결제·확인 실패. `failureStage` 로 송금 전·후 구분 | 남음 |
+| 400 | 입력 형식이 틀림, 조건을 통과한 후보가 없음 | 없음 |
+| 409 | 요청 직후 감사 규칙이 막음(예: 같은 요청이 처리 중). 본문에 `rule` | 없음 |
+| 503 | 우선순위를 비웠는데 Ollama 가 응답하지 않음 | 없음 |
+
+## 감사 규칙 추가하기
+
+같은 이상행위를 서버와 체인 두 곳에서 막습니다. 서버는 빨리 거르고 알림을 남기고, 체인은 서버가 뚫려도 마지막에 막습니다. 각자 **새 파일**을 만들고, 함께 쓰는 파일에는 등록 한 줄만 더합니다.
+
+### 서버 규칙
+
+1. `src/lib/rules/<규칙이름>.ts` 를 만들고, 맞는 자리에 함수를 push 합니다.
+
+```ts
+// src/lib/rules/max-amount.ts — 예시: 한 건 0.5 AEGIS 를 넘으면 막고, 80% 이상이면 알림만 남긴다
+import { AuditBlockedError, BEFORE_PAYMENT_CHECKS } from "../audit";
+
+const MAX_UNITS = 500_000;
+
+BEFORE_PAYMENT_CHECKS.push(async (ctx) => {
+  const amount = ctx.decision.winner.amountUnits;
+  if (amount > MAX_UNITS) throw new AuditBlockedError("max-amount", `한 건 상한 초과: ${amount} units`);
+  if (amount >= MAX_UNITS * 0.8) await ctx.alert("max-amount", `한 건 상한의 80% 이상: ${amount} units`);
+});
+```
+
+2. `src/lib/rules/index.ts` 에 `import "./max-amount";` 한 줄을 더합니다. 적은 순서대로 돕니다.
+
+| 자리 | 언제 | 쓸 수 있는 값 | 막으면 |
+| --- | --- | --- | --- |
+| `ON_REQUEST_CHECKS` | 요청 직후, 모델을 고르기 전 | `ctx.request`(요청 번호·사용자·문장) | 기록 없이 409. 이전 기록을 `return` 하면 새로 처리하지 않고 그 기록을 응답 |
+| `BEFORE_PAYMENT_CHECKS` | 모델을 고르고 처리 중 기록을 남긴 뒤, 송금 직전 | `ctx.request`, `ctx.decision`(고른 모델·금액·점수) | 송금하지 않고 `FAILED`·`before-send` 로 기록 |
+| `AFTER_PAYMENT_CHECKS` | 결과가 기록된 뒤 | 위 값 + 두 번째 인자 `record`(최종 상태) | 막을 수 없음. 오류는 알림으로 남고 결과는 그대로 |
+
+알림(`ctx.alert`)은 MongoDB `alerts` 컬렉션에 쌓입니다. 동시에 들어온 요청끼리 겹치지 않게 하려면 확인과 기록을 MongoDB 의 원자적 연산(unique index, `findOneAndUpdate`)으로 한 번에 처리합니다. 프로그램 메모리 안의 잠금은 서버가 여러 개면 소용없습니다.
+
+### 체인 규칙 (Solidity)
+
+1. `contracts/src/rules/<규칙이름>.sol` 에 `PaymentRules` 를 상속한 abstract contract 를 만듭니다. 먼저 `super._checkPayment(...)` 를 불러 다른 규칙도 돌게 하고, 막을 때 revert 합니다. 체인에서는 구매자 지갑 하나(`from`)를 사용자 한 명으로 봅니다.
+
+```solidity
+// contracts/src/rules/MaxAmountRule.sol — 예시
+pragma solidity ^0.8.24;
+
+import {PaymentRules} from "./PaymentRules.sol";
+
+abstract contract MaxAmountRule is PaymentRules {
+    uint256 public constant MAX_AMOUNT = 500_000; // 0.5 AEGIS
+    error OverMaxAmount(uint256 amount);
+
+    function _checkPayment(address from, address to, uint256 amount, bytes32 requestId) internal virtual override {
+        super._checkPayment(from, to, amount, requestId);
+        if (amount > MAX_AMOUNT) revert OverMaxAmount(amount);
+    }
+}
+```
+
+2. `contracts/src/AegisToken.sol` 에서 상속 목록과 `_checkPayment` 의 override 목록에 이름을 더합니다.
+
+```solidity
+contract AegisToken is ERC20, Ownable, PaymentRules, MaxAmountRule {
+    // ...
+    function _checkPayment(address from, address to, uint256 amount, bytes32 requestId)
+        internal virtual override(PaymentRules, MaxAmountRule)
+    {
+        super._checkPayment(from, to, amount, requestId);
+    }
+}
+```
+
+`npm run chain` 을 다시 켜면 규칙이 담긴 토큰이 로컬 체인에 올라가고, 화면에서 막힌 결제는 송금 전 실패로 보입니다.
+
+### 테스트로 증명하기
+
+공격을 재현하는 테스트가 통과하면 "막힌다"가 증명됩니다. 서버는 `tests/`, 체인은 `contracts/test/` 에 둡니다. 서버 규칙 테스트는 `tests/purchase.test.ts` 처럼 결제 모드를 `mock` 으로 두고 `runPurchase` 를 불러 기록의 `status`·`failureStage`·알림을 확인합니다.
+
+## 테스트가 확인하는 것
+
+| 명령 | 진짜로 도는 것 | 가짜로 바꾼 것 | 확인하지 않는 것 |
+| --- | --- | --- | --- |
+| `npm test` | 선택·점수 계산, 감사 규칙 자리, 기록(임시 MongoDB), 짝짓기 규칙 | 결제(`mock`), Qwen 응답, 세 벤치마크 사이트 응답, 벤치마크 숫자(`tests/fixtures/`) | 체인에서 막히는지, Qwen 이 문장을 맞게 읽는지, 실제 사이트 값 |
+| `forge test` | 컨트랙트(발급, `pay`, 규칙이 `pay` 를 막는지) | 없음(메모리 안의 체인) | 서버와 이어진 흐름 |
+| `npm run chain` + `npm run dev` 후 요청 | 전체 흐름: 서버 규칙, 로컬 체인 결제·체인 규칙, 판매창구 확인 | 모델 응답(Mock 문장) | Base Sepolia 결제 |
+| 위 + Ollama 켜고 우선순위 비워 요청 | Qwen 의 우선순위 판단까지 | 모델 응답(Mock 문장) | Base Sepolia 결제 |
+
 
 ## 스마트 컨트랙트
 
@@ -45,12 +198,6 @@ npm run build
 감사 규칙은 `contracts/src/rules/` 에 파일로 따로 둡니다. 규칙은 `PaymentRules` 를 상속해 `_checkPayment` 를 덮어쓰고, 먼저 `super._checkPayment(...)` 를 부른 뒤 막을 때 revert 합니다. `AegisToken` 에는 상속 목록과 `_checkPayment` 의 override 목록에 규칙 이름만 더합니다.
 
 > Base Sepolia 에는 아직 배포하지 않았습니다. 기존 `AEGIS_TOKEN_ADDRESS`(`0xE208…142b`)에는 `pay` 가 없어서, live 결제는 이 컨트랙트를 배포하고 그 주소로 바꾼 뒤에만 동작합니다. local 은 `npm run chain` 이 띄울 때마다 배포합니다.
-
-```bash
-git submodule update --init --recursive   # 처음 받았을 때만
-cd contracts
-forge test
-```
 
 ## 환경변수
 
@@ -81,7 +228,7 @@ forge test
 
 `local` 은 감사 규칙이 담긴 컨트랙트를 그대로 올려 쓰므로, 체인에서 막히는 것까지 화면에서 확인할 수 있습니다. `npm run chain` 을 끄면 체인과 그 위의 잔액도 사라지고, 다시 켜면 빈 체인에 같은 주소로 새로 배포합니다. 계정은 anvil 의 공개 테스트 계정(0번 운영자, 1번 구매자)이라 실제 자산이 없습니다.
 
-> **경고** — 실제 토큰 전송은 기본적으로 일어나지 않습니다(local). `AEGIS_PAYMENT_MODE=live` **와** `AEGIS_REAL_PAYMENT_APPROVED=yes` 두 변수가 모두 켜져 있고 개인키가 있을 때만 Base Sepolia에서 실제 `transfer`가 실행됩니다. 1건당 금액 상한은 없으므로 live로 켤 때는 예산과 잔액을 직접 확인하세요. 개인키는 절대 커밋하지 마세요.
+> **경고** — 실제 토큰 전송은 기본적으로 일어나지 않습니다(local). `AEGIS_PAYMENT_MODE=live` **와** `AEGIS_REAL_PAYMENT_APPROVED=yes` 두 변수가 모두 켜져 있고 개인키가 있을 때만 Base Sepolia에서 실제 `pay`가 실행됩니다. 1건당 금액 상한은 없으므로 live로 켤 때는 예산과 잔액을 직접 확인하세요. 개인키는 절대 커밋하지 마세요.
 
 ## 기술 스택
 

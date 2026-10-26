@@ -6,7 +6,7 @@
  *   BEFORE_PAYMENT_CHECKS 모델을 고르고 처리 중 기록을 남긴 뒤, 송금 직전.
  *   AFTER_PAYMENT_CHECKS  결과(성공·실패)를 기록한 뒤. 예약해 둔 한도를 되돌리는 일 등을 한다.
  *
- * 규칙은 배열에 함수 하나로 등록한다. 막을 때는 AuditBlockedError 를 던지고,
+ * 규칙은 src/lib/rules/ 에 파일로 두고, 그 파일이 맞는 배열에 함수 하나를 push 한다(rules/index.ts 에서 불러옴). 막을 때는 AuditBlockedError 를 던지고,
  * 결제는 진행하되 알리기만 할 때는 ctx.alert 를 부른다.
  * 체인에서 다시 막는 검사는 여기가 아니라 contracts/src/rules/ 에 둔다.
  * 체인에서는 구매자 지갑 하나를 사용자 한 명으로 본다.
