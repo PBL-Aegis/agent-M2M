@@ -22,3 +22,8 @@ GEMINI.md
 .continue/
 .omp/
 .github/copilot-instructions.md
+
+# Foundry build output
+contracts/out/
+contracts/cache/
+contracts/broadcast/

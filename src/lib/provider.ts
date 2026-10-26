@@ -2,19 +2,23 @@
  * 판매창구. 파는 쪽 역할을 흉내 내는 코드다.
  *
  * 돈을 받았는지 스스로 확인한 뒤에만 결과를 준다. 구매 쪽이 "보냈다"고 말한 것을 믿지 않고,
- * live 모드에서는 체인의 거래 기록을 직접 읽어 수신자와 금액을 대조한다.
+ * live 모드에서는 체인의 거래 기록을 직접 읽어 요청 번호·수신자·금액을 대조한다.
  * 모델 출력 자체는 Mock이다. 실제 OpenAI·Anthropic·Google API를 부르지 않는다.
  */
 
 import { decodeEventLog, getAddress } from "viem";
 
-import { ERC20_ABI, paymentConfig, publicClient } from "./payment";
+import { AEGIS_ABI, paymentConfig, publicClient, requestIdHash } from "./payment";
 import type { PaymentResult, ScoredCandidate } from "./types";
 
 export class DeliveryError extends Error {}
 
 /** 체인에 남은 전송 기록이 이 구매의 조건과 같은지 확인한다. */
-export async function verifyPayment(payment: PaymentResult, winner: ScoredCandidate): Promise<void> {
+export async function verifyPayment(
+  payment: PaymentResult,
+  winner: ScoredCandidate,
+  requestId: string,
+): Promise<void> {
   if (payment.mode === "mock") {
     if (!payment.txHash.startsWith("mock:")) {
       throw new DeliveryError("mock 결제인데 거래번호 형식이 다릅니다");
@@ -31,20 +35,25 @@ export async function verifyPayment(payment: PaymentResult, winner: ScoredCandid
 
   const token = getAddress(payment.tokenAddress);
   const expectedTo = getAddress(winner.recipient);
+  const expectedRequest = requestIdHash(requestId);
   const matched = receipt.logs.some((log) => {
     if (getAddress(log.address) !== token) return false;
     try {
-      const event = decodeEventLog({ abi: ERC20_ABI, data: log.data, topics: log.topics });
-      if (event.eventName !== "Transfer") return false;
-      const args = event.args as { to: `0x${string}`; value: bigint };
-      return getAddress(args.to) === expectedTo && args.value === BigInt(winner.amountUnits);
+      const event = decodeEventLog({ abi: AEGIS_ABI, data: log.data, topics: log.topics });
+      if (event.eventName !== "Paid") return false;
+      const args = event.args as { requestId: `0x${string}`; to: `0x${string}`; amount: bigint };
+      return (
+        args.requestId === expectedRequest &&
+        getAddress(args.to) === expectedTo &&
+        args.amount === BigInt(winner.amountUnits)
+      );
     } catch {
       return false;
     }
   });
   if (!matched) {
     throw new DeliveryError(
-      "이 거래에는 약속한 수신자에게 약속한 금액을 보낸 기록이 없습니다",
+      "이 거래에는 이 요청 번호로 약속한 수신자에게 약속한 금액을 보낸 기록이 없습니다",
     );
   }
 }

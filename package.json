@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "next dev -p 3100",
+    "chain": "node scripts/local-chain.mjs",
     "build": "next build",
     "start": "next start -p 3100",
     "test": "vitest run",

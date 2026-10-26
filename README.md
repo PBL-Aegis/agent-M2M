@@ -1,17 +1,22 @@
 # agent-M2M
 
-AI 구매 에이전트가 벤치마크 표를 보고 모델 하나를 고른 뒤, AEGIS 토큰(Base Sepolia ERC-20)으로 값을 치르고, 판매창구가 결제를 확인한 뒤에만 결과를 돌려주는 데모입니다. 모델 선택은 LLM 없이 고정된 가중치 계산으로만 해서, 왜 그 모델이 골라졌는지 후보별 점수와 탈락 사유를 그대로 열어볼 수 있습니다. 요청에 우선순위가 없을 때만 로컬 Qwen(Ollama)이 요청 문장을 읽고 우선순위 하나를 정합니다. 모델 출력은 Mock이며 실제 OpenAI·Anthropic·Google API를 부르지 않습니다.
+AI 구매 에이전트가 벤치마크 표를 보고 모델 하나를 고른 뒤, AEGIS 토큰(ERC-20)으로 값을 치르고, 판매창구가 결제를 확인한 뒤에만 결과를 돌려주는 데모입니다. 모델 선택은 LLM 없이 고정된 가중치 계산으로만 해서, 왜 그 모델이 골라졌는지 후보별 점수와 탈락 사유를 그대로 열어볼 수 있습니다. 요청에 우선순위가 없을 때만 로컬 Qwen(Ollama)이 요청 문장을 읽고 우선순위 하나를 정합니다. 모델 출력은 Mock이며 실제 OpenAI·Anthropic·Google API를 부르지 않습니다.
 
 ## 흐름
 
-요청 → 선택 → 결제 → 확인 → 결과 → 기록
+요청 → 감사(요청 직후) → 선택 → 기록(처리 중) → 감사(송금 직전) → 결제 → 확인 → 결과 → 기록(성공·실패) → 감사(결제 후)
 
-1. **요청**: 요청 내용, 예산(units), 우선순위(기본·가격·속도·지능), 필요 기능. 우선순위를 비우면 로컬 Qwen이 요청 문장에 적힌 선호(싸게·빨리·정확하게)를 보고 네 값 중 하나를 고르고, 선호가 없거나 서로 부딪히면 기본을 고릅니다. Qwen이 응답하지 않으면 결제 전에 멈춥니다(503).
+1. **요청**: 요청 내용, 예산(units), 우선순위(기본·가격·속도·지능), 필요 기능, 요청 번호(`requestId`), 사용자(`userId`). 요청 번호를 비우면 서버가 만들고, 사용자를 비우면 비워 둔 채 기록합니다. 우선순위를 비우면 로컬 Qwen이 요청 문장에 적힌 선호(싸게·빨리·정확하게)를 보고 네 값 중 하나를 고르고, 선호가 없거나 서로 부딪히면 기본을 고릅니다. Qwen이 응답하지 않으면 결제 전에 멈춥니다(503).
 2. **선택**: 후보마다 금액 계산 → 필요 기능으로 하드 필터 → 살아남은 후보끼리 가격·시간·지능 점수 → 가중치 합산 → 고정 규칙으로 동점 처리. 예산은 선택에서 거르지 않습니다(이상 거래 시나리오를 재현하기 위해).
-3. **결제**: 선택된 모델의 수신자 주소로 AEGIS `transfer` (기본은 mock).
-4. **확인**: 판매창구가 체인의 Transfer 기록에서 수신자·금액을 대조(live일 때).
-5. **결과**: Mock 응답 문장.
-6. **기록**: 후보·점수·탈락 사유·가중치·스냅샷 해시·거래번호를 MongoDB에 덧붙임.
+3. **기록(처리 중)**: 결제 직전에 `PROCESSING` 상태로 MongoDB에 먼저 남김.
+4. **감사**: `src/lib/audit.ts` 에 등록한 규칙을 세 번 돌림. 결제를 막지 않는 경고는 `alerts` 컬렉션에 남김.
+   - 요청 직후(`ON_REQUEST_CHECKS`): 모델을 고르기 전. 막으면 기록 없이 409. 이전 기록을 돌려주면 새로 처리하지 않고 그 기록을 응답.
+   - 송금 직전(`BEFORE_PAYMENT_CHECKS`): 막으면 송금하지 않고 송금 전 실패로 기록.
+   - 결제 후(`AFTER_PAYMENT_CHECKS`): 성공·실패가 기록된 뒤. 예약한 한도 되돌리기 등. 여기서 실패해도 결과는 바뀌지 않고 알림으로 남음.
+5. **결제**: 선택된 모델의 수신자 주소로 AEGIS `pay(수신자, 금액, 요청 번호)` (기본은 로컬 체인). 요청 번호는 문자열의 keccak256 으로 넘깁니다.
+6. **확인**: 판매창구가 체인의 `Paid` 기록에서 요청 번호·수신자·금액을 대조.
+7. **결과**: Mock 응답 문장.
+8. **기록(성공·실패)**: 같은 기록의 상태를 `SETTLED` 또는 `FAILED` 로 바꿈. 실패는 송금 전(`before-send`)·송금 후(`after-send`)를 구분하고, 송금 후 실패면 거래번호를 그대로 남김. 후보·점수·탈락 사유 같은 결정 근거는 처음 저장한 뒤 고치지 않음.
 
 ## 화면
 
@@ -26,10 +31,25 @@ AI 구매 에이전트가 벤치마크 표를 보고 모델 하나를 고른 뒤
 
 ```bash
 npm install
+npm run chain      # 로컬 체인(anvil)을 띄우고 토큰 배포·발급. 켜 둔 채로 다른 창에서 다음 명령
 npm run dev        # http://localhost:3100
 npm test           # vitest
 npm run typecheck
 npm run build
+```
+
+## 스마트 컨트랙트
+
+`contracts/` 는 Foundry 프로젝트입니다. 체인에서는 구매자 지갑 하나를 사용자 한 명으로 봅니다. `AegisToken` 은 소수점 6자리 ERC-20이며 운영자만 새로 발급합니다. 구매 결제는 `pay` 로 하며, `pay` 는 송금 전에 감사 규칙을 돌리고 `Paid(요청 번호, 보낸 쪽, 받는 쪽, 금액)` 이벤트를 남깁니다.
+
+감사 규칙은 `contracts/src/rules/` 에 파일로 따로 둡니다. 규칙은 `PaymentRules` 를 상속해 `_checkPayment` 를 덮어쓰고, 먼저 `super._checkPayment(...)` 를 부른 뒤 막을 때 revert 합니다. `AegisToken` 에는 상속 목록과 `_checkPayment` 의 override 목록에 규칙 이름만 더합니다.
+
+> Base Sepolia 에는 아직 배포하지 않았습니다. 기존 `AEGIS_TOKEN_ADDRESS`(`0xE208…142b`)에는 `pay` 가 없어서, live 결제는 이 컨트랙트를 배포하고 그 주소로 바꾼 뒤에만 동작합니다. local 은 `npm run chain` 이 띄울 때마다 배포합니다.
+
+```bash
+git submodule update --init --recursive   # 처음 받았을 때만
+cd contracts
+forge test
 ```
 
 ## 환경변수
@@ -38,9 +58,9 @@ npm run build
 
 | 이름 | 기본값 | 뜻 |
 | --- | --- | --- |
-| `AEGIS_PAYMENT_MODE` | `mock` | `live`면 실제 전송을 요청 |
+| `AEGIS_PAYMENT_MODE` | `local` | `local`: 로컬 체인 · `live`: Base Sepolia 전송을 요청 · `mock`: 체인 없이 흐름만(자동 테스트용) |
 | `AEGIS_REAL_PAYMENT_APPROVED` | `no` | `yes`여야 live가 실제로 켜짐 |
-| `AEGIS_TOKEN_ADDRESS` | `0xE208…142b` | Base Sepolia에 배포된 AEGIS 토큰(소수점 6자리) |
+| `AEGIS_TOKEN_ADDRESS` | `0xE208…142b` | live 에서 쓰는 Base Sepolia AEGIS 토큰(소수점 6자리). 지금 값은 `pay` 가 없는 이전 토큰 |
 | `AEGIS_CHAIN_ID` | `84532` | Base Sepolia |
 | `AEGIS_RPC_URL` | `https://sepolia.base.org` | RPC |
 | `AEGIS_BUYER_PRIVATE_KEY` | (비움) | 구매자 지갑 개인키. live에서만 필요 |
@@ -51,11 +71,21 @@ npm run build
 | `AEGIS_OLLAMA_MODEL` | `qwen3.5:4b` | 우선순위 추론 모델 |
 | `AEGIS_OLLAMA_TIMEOUT_SECONDS` | `30` | 추론 대기 시간(초, 최대 60) |
 
-> **경고** — 실제 토큰 전송은 기본적으로 일어나지 않습니다(mock). `AEGIS_PAYMENT_MODE=live` **와** `AEGIS_REAL_PAYMENT_APPROVED=yes` 두 변수가 모두 켜져 있고 개인키가 있을 때만 Base Sepolia에서 실제 `transfer`가 실행됩니다. 1건당 금액 상한은 없으므로 live로 켤 때는 예산과 잔액을 직접 확인하세요. 개인키는 절대 커밋하지 마세요.
+## 결제 모드
+
+| 모드 | 어디로 | 필요한 것 |
+| --- | --- | --- |
+| `local` (기본) | 이 컴퓨터의 anvil | `npm run chain` 을 켜 둠 |
+| `live` | Base Sepolia | 아래 두 변수, 개인키, `pay` 가 있는 토큰 주소 |
+| `mock` | 없음(흐름만) | 자동 테스트(`npm test`)가 씀 |
+
+`local` 은 감사 규칙이 담긴 컨트랙트를 그대로 올려 쓰므로, 체인에서 막히는 것까지 화면에서 확인할 수 있습니다. `npm run chain` 을 끄면 체인과 그 위의 잔액도 사라지고, 다시 켜면 빈 체인에 같은 주소로 새로 배포합니다. 계정은 anvil 의 공개 테스트 계정(0번 운영자, 1번 구매자)이라 실제 자산이 없습니다.
+
+> **경고** — 실제 토큰 전송은 기본적으로 일어나지 않습니다(local). `AEGIS_PAYMENT_MODE=live` **와** `AEGIS_REAL_PAYMENT_APPROVED=yes` 두 변수가 모두 켜져 있고 개인키가 있을 때만 Base Sepolia에서 실제 `transfer`가 실행됩니다. 1건당 금액 상한은 없으므로 live로 켤 때는 예산과 잔액을 직접 확인하세요. 개인키는 절대 커밋하지 마세요.
 
 ## 기술 스택
 
-Next.js 15 (App Router) · React 19 · TypeScript · viem · MongoDB · Ollama(Qwen) · vitest
+Next.js 15 (App Router) · React 19 · TypeScript · viem · MongoDB · Ollama(Qwen) · vitest · Solidity(Foundry·anvil, OpenZeppelin)
 
 ## 벤치마크 값 갱신
 

@@ -102,7 +102,7 @@ export function ChatPanel() {
                   <div className="picked">
                     <b>{turn.record.decision.winner.displayName}</b> 선택 ·{" "}
                     {toAegis(turn.record.decision.winner.amountUnits)} AEGIS 결제
-                    {turn.record.payment?.mode === "mock" && " (mock)"}
+                    {turn.record.payment !== null && turn.record.payment.mode !== "live" && ` (${turn.record.payment.mode})`}
                   </div>
                   <pre className="result">{turn.record.resultText}</pre>
                   <button

@@ -89,7 +89,7 @@ function round(value: number): number {
 export class SelectionError extends Error {}
 
 export function decide(
-  request: PurchaseRequest,
+  request: Omit<PurchaseRequest, "requestId" | "userId">,
   source: { snapshot: BenchmarkSnapshot; hash: string } = loadSnapshot(),
 ): Decision {
   const maxOutputTokens = request.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
