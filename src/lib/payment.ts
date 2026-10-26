@@ -3,9 +3,11 @@
  * pay 는 요청 번호를 함께 받아 체인의 감사 규칙(contracts/)을 돌린 뒤 송금한다.
  * 그래서 live 는 pay 가 있는 토큰(contracts/src/AegisToken.sol)을 배포한 주소에서만 동작한다.
  *
- * 기본값은 mock이다. 실제 전송은 두 가지가 모두 켜져 있을 때만 일어난다.
+ * 기본값은 local 이다. 이 컴퓨터의 anvil(npm run chain)에 올린 토큰으로 보낸다. 실제 자산은 오가지 않는다.
+ * Base Sepolia 전송은 두 가지가 모두 켜져 있을 때만 일어난다.
  *   AEGIS_PAYMENT_MODE=live
  *   AEGIS_REAL_PAYMENT_APPROVED=yes
+ * AEGIS_PAYMENT_MODE=mock 은 체인 없이 흐름만 이어 가는 자동 테스트용이다.
  * 개인키는 이 파일 안에서만 읽고, 밖으로 내보내지 않는다. 화면과 기록에는 주소만 남는다.
  */
 
@@ -13,13 +15,14 @@ import {
   createPublicClient,
   createWalletClient,
   getAddress,
+  getContractAddress,
   http,
   keccak256,
   stringToBytes,
   type Hex,
 } from "viem";
-import { privateKeyToAccount } from "viem/accounts";
-import { baseSepolia } from "viem/chains";
+import { mnemonicToAccount, privateKeyToAccount } from "viem/accounts";
+import { baseSepolia, foundry } from "viem/chains";
 
 import type { PaymentMode, PaymentResult } from "./types";
 
@@ -80,6 +83,23 @@ export const AEGIS_ABI = [
   },
 ] as const;
 
+/** anvil 이 띄울 때마다 똑같이 만드는 공개 테스트 계정. 로컬 체인에서만 쓰고, 실제 자산은 없다. */
+const ANVIL_MNEMONIC = "test test test test test test test test test test test junk";
+export const LOCAL_RPC_URL = "http://127.0.0.1:8545";
+
+/** 0번 계정은 운영자(토큰 배포·발급), 1번 계정은 구매자다. scripts/local-chain.mjs 도 같은 계정을 쓴다. */
+export function localAccounts() {
+  return {
+    owner: mnemonicToAccount(ANVIL_MNEMONIC, { addressIndex: 0 }),
+    buyer: mnemonicToAccount(ANVIL_MNEMONIC, { addressIndex: 1 }),
+  };
+}
+
+/** 새로 띄운 anvil 에서 운영자의 첫 거래로 배포한 토큰 주소. npm run chain 이 이 순서로 배포한다. */
+export function localTokenAddress(): string {
+  return getContractAddress({ from: localAccounts().owner.address, nonce: 0n });
+}
+
 /** 체인에 넘기는 요청 번호. 요청 번호 문자열의 keccak256 이다. */
 export function requestIdHash(requestId: string): Hex {
   return keccak256(stringToBytes(requestId));
@@ -114,8 +134,18 @@ function requiredEnv(name: string): string {
 /** 화면에 보여줄 수 있는 설정만 모은다. 개인키는 여기에 들어가지 않는다. */
 export function paymentConfig(): PaymentConfig {
   const approved = process.env.AEGIS_REAL_PAYMENT_APPROVED === "yes";
-  const requested = (process.env.AEGIS_PAYMENT_MODE ?? "mock").trim().toLowerCase();
-  const mode: PaymentMode = requested === "live" && approved ? "live" : "mock";
+  const requested = (process.env.AEGIS_PAYMENT_MODE ?? "local").trim().toLowerCase();
+  const mode: PaymentMode =
+    requested === "live" && approved ? "live" : requested === "mock" ? "mock" : "local";
+  if (mode === "local") {
+    return {
+      mode,
+      tokenAddress: localTokenAddress(),
+      chainId: foundry.id,
+      rpcUrl: LOCAL_RPC_URL,
+      buyerAddress: localAccounts().buyer.address,
+    };
+  }
   const key = process.env.AEGIS_BUYER_PRIVATE_KEY;
   return {
     mode,
@@ -129,8 +159,12 @@ export function paymentConfig(): PaymentConfig {
   };
 }
 
+function chainOf(config: PaymentConfig) {
+  return config.mode === "live" ? baseSepolia : foundry;
+}
+
 export function publicClient(config: PaymentConfig) {
-  return createPublicClient({ chain: baseSepolia, transport: http(config.rpcUrl) });
+  return createPublicClient({ chain: chainOf(config), transport: http(config.rpcUrl) });
 }
 
 /** 대시보드에 보여줄 구매 에이전트 지갑의 AEGIS 잔액. 조회하지 못하면 units는 null이고 사유를 남긴다. */
@@ -145,7 +179,8 @@ export async function buyerBalance(): Promise<{ units: number | null; status: st
       functionName: "balanceOf",
       args: [getAddress(config.buyerAddress)],
     });
-    return { units: Number(balance), status: "Base Sepolia 온체인 잔액 조회 완료" };
+    const where = config.mode === "live" ? "Base Sepolia" : "로컬 체인";
+    return { units: Number(balance), status: `${where} 온체인 잔액 조회 완료` };
   } catch {
     return { units: null, status: "잔액 조회 실패 · RPC 응답 없음" };
   }
@@ -175,11 +210,14 @@ export async function pay(args: {
     };
   }
 
-  const token = getAddress(requiredEnv("AEGIS_TOKEN_ADDRESS"));
-  const account = privateKeyToAccount(requiredEnv("AEGIS_BUYER_PRIVATE_KEY") as Hex);
+  const live = config.mode === "live";
+  const token = getAddress(live ? requiredEnv("AEGIS_TOKEN_ADDRESS") : config.tokenAddress);
+  const account = live
+    ? privateKeyToAccount(requiredEnv("AEGIS_BUYER_PRIVATE_KEY") as Hex)
+    : localAccounts().buyer;
   const wallet = createWalletClient({
     account,
-    chain: baseSepolia,
+    chain: chainOf(config),
     transport: http(config.rpcUrl),
   });
   const reader = publicClient(config);
@@ -215,7 +253,7 @@ export async function pay(args: {
   }
 
   return {
-    mode: "live",
+    mode: config.mode,
     txHash,
     from: account.address,
     to,

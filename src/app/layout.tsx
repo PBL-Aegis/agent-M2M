@@ -29,9 +29,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               <SiteNav />
               <span
                 className={`mode${mode === "live" ? " live" : ""}`}
-                title={mode === "live" ? "실제 AEGIS 토큰이 전송됩니다" : "실제 전송 없음"}
+                title={mode === "live" ? "실제 AEGIS 토큰이 전송됩니다" : mode === "local" ? "이 컴퓨터의 로컬 체인으로 전송합니다" : "실제 전송 없음"}
               >
-                {mode === "live" ? "Live" : "Mock"}
+                {mode === "live" ? "Live" : mode === "local" ? "Local" : "Mock"}
               </span>
             </div>
           </div>

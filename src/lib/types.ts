@@ -167,7 +167,8 @@ export interface Decision {
   winner: ScoredCandidate;
 }
 
-export type PaymentMode = "mock" | "live";
+/** local 은 이 컴퓨터의 anvil, live 는 Base Sepolia, mock 은 체인 없이 흐름만 잇는 자동 테스트용. */
+export type PaymentMode = "mock" | "local" | "live";
 
 export interface PaymentResult {
   mode: PaymentMode;
@@ -179,7 +180,7 @@ export interface PaymentResult {
   chainId: number;
   /** 체인에 넘긴 요청 번호(keccak256). 이 칸이 생기기 전 기록에는 없다. */
   requestIdHash?: string;
-  /** live일 때만 채워진다. */
+  /** 체인에 보냈을 때(local·live)만 채워진다. */
   blockNumber?: string;
 }
 
