@@ -1,14 +1,15 @@
 /**
  * 구매 한 건의 전체 흐름.
  *
- *   요청 → 모델 선택 → 기록(처리 중) → 감사 규칙 → 결제 → 판매창구 확인 → 결과 → 기록(성공·실패)
+ *   요청 → 감사(요청 직후) → 모델 선택 → 기록(처리 중) → 감사(송금 직전) → 결제 → 판매창구 확인
+ *   → 결과 → 기록(성공·실패) → 감사(결제 후)
  *
  * 실패하면 결과 없이 실패 사유와 송금 전·후 여부를 남긴다. 실패한 건을 자동으로 다시 결제하지 않는다.
  */
 
 import { randomUUID } from "node:crypto";
 
-import { runBeforePayment } from "./audit";
+import { runAfterPayment, runBeforePayment, runOnRequest, type IncomingRequest } from "./audit";
 import { loadFreshSnapshot } from "./benchmark";
 import { pay, PaymentError, paymentConfig } from "./payment";
 import { inferPriority } from "./priority-llm";
@@ -21,14 +22,19 @@ export async function runPurchase(input: PurchaseInput): Promise<PurchaseRecord>
   const id = randomUUID();
   if (await purchaseExists(id)) throw new Error("구매 번호가 중복되었습니다");
 
-  // 0) 우선순위가 없으면 로컬 Qwen 이 요청 문장을 보고 정한다. 실패하면 결제 전에 멈춘다.
-  const inferred = input.priority === undefined ? await inferPriority(input.prompt) : null;
-  const request: PurchaseRequest = {
+  const incoming: IncomingRequest = {
     ...input,
     requestId: input.requestId ?? randomUUID(),
     userId: input.userId ?? null,
-    priority: inferred?.priority ?? input.priority!,
   };
+
+  // 0) 감사(요청 직후) — 이전 기록을 돌려받으면 새로 처리하지 않고 그대로 응답한다.
+  const previous = await runOnRequest({ purchaseId: id, request: incoming });
+  if (previous !== null) return previous;
+
+  // 우선순위가 없으면 로컬 Qwen 이 요청 문장을 보고 정한다. 실패하면 결제 전에 멈춘다.
+  const inferred = incoming.priority === undefined ? await inferPriority(incoming.prompt) : null;
+  const request: PurchaseRequest = { ...incoming, priority: inferred?.priority ?? incoming.priority! };
 
   // 1) 선택 — 여기서 실패하면 결제는 시작조차 하지 않는다.
   const source = await loadFreshSnapshot();
@@ -56,7 +62,7 @@ export async function runPurchase(input: PurchaseInput): Promise<PurchaseRecord>
   let payment: PaymentResult | null = null;
   let outcome: PurchaseOutcome;
   try {
-    // 2) 감사 규칙 — 하나라도 막으면 송금하지 않는다.
+    // 2) 감사(송금 직전) — 하나라도 막으면 송금하지 않는다.
     await runBeforePayment({ purchaseId: id, request, decision });
 
     // 3) 결제
@@ -84,7 +90,11 @@ export async function runPurchase(input: PurchaseInput): Promise<PurchaseRecord>
     };
   }
   const updatedAt = await updatePurchase(id, outcome);
-  return { ...record, ...outcome, updatedAt };
+  const settled: PurchaseRecord = { ...record, ...outcome, updatedAt };
+
+  // 5) 감사(결제 후) — 결과는 이미 기록됐다. 예약해 둔 한도를 되돌리는 일 등을 한다.
+  await runAfterPayment({ purchaseId: id, request, decision }, settled);
+  return settled;
 }
 
 export function currentMode(): ReturnType<typeof paymentConfig> {

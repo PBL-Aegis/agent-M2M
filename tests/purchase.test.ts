@@ -28,7 +28,9 @@ afterAll(async () => {
 });
 
 beforeEach(() => {
+  audit.ON_REQUEST_CHECKS.length = 0;
   audit.BEFORE_PAYMENT_CHECKS.length = 0;
+  audit.AFTER_PAYMENT_CHECKS.length = 0;
   verifyFailure.error = null;
 });
 
@@ -77,5 +79,45 @@ describe("runPurchase", () => {
     expect(saved?.status).toBe("FAILED");
     expect(saved?.failureStage).toBe("after-send");
     expect(saved?.payment?.txHash).toBe(`mock:${record.id}`);
+  });
+
+  it("요청 직후 규칙이 이전 기록을 돌려주면 새로 처리하지 않고 그 기록을 돌려준다", async () => {
+    const first = await runPurchase({ ...input, requestId: "req-again" });
+    audit.ON_REQUEST_CHECKS.push(async (ctx) =>
+      ctx.request.requestId === "req-again" ? ((await store.getPurchase(first.id)) ?? undefined) : undefined,
+    );
+    const before = (await store.listPurchases(500)).length;
+    const again = await runPurchase({ ...input, requestId: "req-again" });
+    expect(again.id).toBe(first.id);
+    expect((await store.listPurchases(500)).length).toBe(before);
+  });
+
+  it("요청 직후 규칙이 막으면 기록 없이 AuditBlockedError 가 나간다", async () => {
+    audit.ON_REQUEST_CHECKS.push(async () => {
+      throw new audit.AuditBlockedError("test-request", "처리 중입니다");
+    });
+    const before = (await store.listPurchases(500)).length;
+    await expect(runPurchase(input)).rejects.toBeInstanceOf(audit.AuditBlockedError);
+    expect((await store.listPurchases(500)).length).toBe(before);
+  });
+
+  it("결제 후 규칙은 확정된 기록을 받고, 실패해도 결과를 바꾸지 않고 알림만 남긴다", async () => {
+    const seen: string[] = [];
+    audit.BEFORE_PAYMENT_CHECKS.push(async () => {
+      throw new audit.AuditBlockedError("test-rule", "막음");
+    });
+    audit.AFTER_PAYMENT_CHECKS.push(async (_ctx, record) => {
+      seen.push(`${record.status}:${record.failureStage}`);
+    });
+    audit.AFTER_PAYMENT_CHECKS.push(async () => {
+      throw new Error("되돌리기 실패");
+    });
+    const record = await runPurchase(input);
+    expect(seen).toEqual(["FAILED:before-send"]);
+    expect((await store.getPurchase(record.id))?.status).toBe("FAILED");
+    const alerts = await store.listAlerts();
+    expect(alerts.find((alert) => alert.purchaseId === record.id && alert.rule === "after-payment")?.message).toContain(
+      "되돌리기 실패",
+    );
   });
 });

@@ -9,6 +9,7 @@
 
 import { NextResponse } from "next/server";
 
+import { AuditBlockedError } from "@/lib/audit";
 import { PriorityInferenceError } from "@/lib/priority-llm";
 import { runPurchase } from "@/lib/purchase";
 import { SelectionError } from "@/lib/select";
@@ -87,6 +88,10 @@ export async function POST(httpRequest: Request): Promise<NextResponse> {
   } catch (error) {
     // 선택 단계에서 막힌 경우(후보 없음 등)는 결제 전이므로 기록 없이 400 으로 알린다.
     if (error instanceof SelectionError) return bad(error.message);
+    // 요청 직후 감사 규칙이 막은 경우. 모델을 고르기 전이라 기록 없이 409 로 알린다.
+    if (error instanceof AuditBlockedError) {
+      return NextResponse.json({ error: error.message, rule: error.rule }, { status: 409 });
+    }
     // 우선순위 추론이 안 되면 결제 전이다. 기본값으로 메우지 않고 멈춘다.
     if (error instanceof PriorityInferenceError) {
       return NextResponse.json({ error: error.message }, { status: 503 });
