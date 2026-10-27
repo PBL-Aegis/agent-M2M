@@ -124,13 +124,17 @@ curl -s -X POST localhost:3100/api/purchase -H 'content-type: application/json' 
 ```ts
 // src/lib/rules/max-amount.ts — 예시: 한 건 0.5 AEGIS 를 넘으면 막고, 80% 이상이면 알림만 남긴다
 import { AuditBlockedError, BEFORE_PAYMENT_CHECKS } from "../audit";
+import { parseAegis } from "../format";
 
-const MAX_UNITS = 500_000;
+// 숫자는 코드에 박지 않고 설정값으로 둔다. 사람이 적는 값은 AEGIS, 비교는 units 로.
+const MAX_UNITS = parseAegis(process.env.AUDIT_MAX_AMOUNT ?? "0.5");
+if (MAX_UNITS === null) throw new Error("AUDIT_MAX_AMOUNT 는 AEGIS 금액이어야 합니다 (예: 0.5)");
+const WARN_RATIO = Number(process.env.AUDIT_MAX_AMOUNT_WARN_RATIO ?? "0.8");
 
 BEFORE_PAYMENT_CHECKS.push(async (ctx) => {
   const amount = ctx.decision.winner.amountUnits;
   if (amount > MAX_UNITS) throw new AuditBlockedError("max-amount", `한 건 상한 초과: ${amount} units`);
-  if (amount >= MAX_UNITS * 0.8) await ctx.alert("max-amount", `한 건 상한의 80% 이상: ${amount} units`);
+  if (amount >= MAX_UNITS * WARN_RATIO) await ctx.alert("max-amount", `한 건 상한의 ${WARN_RATIO * 100}% 이상: ${amount} units`);
 });
 ```
 
