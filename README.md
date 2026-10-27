@@ -42,7 +42,7 @@ AI 구매 에이전트가 벤치마크 표를 보고 모델 하나를 고른 뒤
 ### 2. 받고 준비하기
 
 ```bash
-git clone git@github.com:codenameVien/agent-M2M.git
+git clone git@github.com:PBL-Aegis/agent-M2M.git
 cd agent-M2M
 git submodule update --init --recursive   # 컨트랙트 라이브러리(OpenZeppelin, forge-std)
 npm install
