@@ -1,15 +1,15 @@
 # agent-M2M
 
-AI 구매 에이전트가 벤치마크 표를 보고 모델 하나를 고른 뒤, AEGIS 토큰(ERC-20)으로 값을 치르고, 판매창구가 결제를 확인한 뒤에만 결과를 돌려주는 데모입니다. 모델 선택은 LLM 없이 고정된 가중치 계산으로만 해서, 왜 그 모델이 골라졌는지 후보별 점수와 탈락 사유를 그대로 열어볼 수 있습니다. 요청에 우선순위가 없을 때만 로컬 Qwen(Ollama)이 요청 문장을 읽고 우선순위 하나를 정합니다. 모델 출력은 Mock이며 실제 OpenAI·Anthropic·Google API를 부르지 않습니다.
+AI 구매 에이전트가 벤치마크 표를 보고 모델 하나를 고른 뒤, AEGIS 토큰(ERC-20, 1 AEGIS = 1달러)으로 값을 치르고, 판매창구가 결제를 확인한 뒤에만 결과를 돌려주는 데모입니다. 모델 선택은 LLM 없이 고정된 가중치 계산으로만 해서, 왜 그 모델이 골라졌는지 후보별 점수와 탈락 사유를 그대로 열어볼 수 있습니다. 요청에 우선순위가 없을 때만 로컬 Qwen(Ollama)이 요청 문장을 읽고 우선순위 하나를 정합니다. 모델 출력은 Mock이며 실제 OpenAI·Anthropic·Google API를 부르지 않습니다.
 
 ## 흐름
 
 요청 → 감사(요청 직후) → 선택 → 기록(처리 중) → 감사(송금 직전) → 결제 → 확인 → 결과 → 기록(성공·실패) → 감사(결제 후)
 
-1. **요청**: 요청 내용, 예산(units), 우선순위(기본·가격·속도·지능), 필요 기능, 요청 번호(`requestId`), 사용자(`userId`). 요청 번호를 비우면 서버가 만들고, 사용자를 비우면 비워 둔 채 기록합니다. 우선순위를 비우면 로컬 Qwen이 요청 문장에 적힌 선호(싸게·빨리·정확하게)를 보고 네 값 중 하나를 고르고, 선호가 없거나 서로 부딪히면 기본을 고릅니다. Qwen이 응답하지 않으면 결제 전에 멈춥니다(503). 화면에서는 기본을 직접 고르지 않고, 우선순위를 비워 둔 "요청 문장으로 판단"이 처음 값입니다.
+1. **요청**: 요청 내용, 예산(units), 우선순위(싸게·빠르게·똑똑하게), 필요 기능, 요청 번호(`requestId`), 사용자(`userId`). 요청 번호를 비우면 서버가 만들고, 사용자를 비우면 비워 둔 채 기록합니다. 우선순위를 비우면 로컬 Qwen이 요청 문장에 적힌 선호(싸게·빨리·정확하게)를 보고 네 값 중 하나를 고르고, 선호가 없거나 서로 부딪히면 기본을 고릅니다. Qwen이 응답하지 않으면 결제 전에 멈춥니다(503). 화면에서는 기본을 직접 고르지 않고, 우선순위를 비워 둔 "요청 문장으로 판단"이 처음 값입니다.
 2. **선택**: 후보마다 금액 계산 → 필요 기능으로 하드 필터 → 살아남은 후보끼리 가격·속도·성능 점수 → 가중치 합산 → 고정 규칙으로 동점 처리. 예산은 선택에서 거르지 않습니다(이상 거래 시나리오를 재현하기 위해).
 3. **기록(처리 중)**: 결제 직전에 `PROCESSING` 상태로 MongoDB에 먼저 남김.
-4. **감사**: `src/lib/audit.ts` 에 등록한 규칙을 세 번 돌림. 결제를 막지 않는 경고는 `alerts` 컬렉션에 남김.
+4. **감사**: `src/lib/rules/` 에 등록한 규칙을 세 자리에서 돌림. 규칙이 막으면 "차단", 막지 않고 알리면 "경고" 알림이 `alerts` 컬렉션에 남고 대시보드의 이상 거래에 뜸.
    - 요청 직후(`ON_REQUEST_CHECKS`): 모델을 고르기 전. 막으면 기록 없이 409. 이전 기록을 돌려주면 새로 처리하지 않고 그 기록을 응답.
    - 송금 직전(`BEFORE_PAYMENT_CHECKS`): 막으면 송금하지 않고 송금 전 실패로 기록.
    - 결제 후(`AFTER_PAYMENT_CHECKS`): 성공·실패가 기록된 뒤. 예약한 한도 되돌리기 등. 여기서 실패해도 결과는 바뀌지 않고 알림으로 남음.
@@ -23,7 +23,7 @@ AI 구매 에이전트가 벤치마크 표를 보고 모델 하나를 고른 뒤
 | 경로 | 내용 |
 | --- | --- |
 | `/` | 새 구매 요청 |
-| `/dashboard` | 요약 · 최근 기록 · 구매자 지갑 잔액 |
+| `/dashboard` | 요약(구매자 지갑 잔액·정산 거래·결제 합계·이상 거래 수) · 최근 기록 · 최근 이상 거래 |
 | `/dashboard/purchases` | 전체 요청·결제 기록 |
 | `/dashboard/alerts` | 이상 거래: 감사 규칙이 막은 거래(차단)와 경고 |
 | `/dashboard/[id]` | 기록 한 건의 결정 근거와 그 거래의 이상 거래 알림 |
@@ -42,14 +42,14 @@ AI 구매 에이전트가 벤치마크 표를 보고 모델 하나를 고른 뒤
 ### 2. 받고 준비하기
 
 ```bash
-git clone git@github.com:codenameVien/agent-M2M.git
+git clone git@github.com:PBL-Aegis/agent-M2M.git
 cd agent-M2M
 git submodule update --init --recursive   # 컨트랙트 라이브러리(OpenZeppelin, forge-std)
 npm install
 cp .env.example .env.local                # 값은 .env.local 에만 넣는다
 ```
 
-`.env.local` 은 그대로 두어도 로컬 체인으로 돌아갑니다. 판매 목록을 다시 만들 때만 `AA_API_KEY` 가 필요합니다.
+`.env.local` 은 그대로 두어도 로컬 체인으로 돌아갑니다. `AA_API_KEY` 는 판매 목록을 다시 만들 때 필요하고, 없으면 1시간마다 하는 숫자 갱신만 건너뛰고 저장된 숫자로 계속 돕니다.
 
 ### 3. 실행하기
 
@@ -81,7 +81,7 @@ cd contracts && forge test  # 컨트랙트 테스트
 
 ## 요청 보내기
 
-화면 대신 에이전트처럼 API 로 보낼 수 있습니다. `budgetUnits` 는 최소 단위(1 AEGIS = 1,000,000 units)입니다.
+화면 대신 에이전트처럼 API 로 보낼 수 있습니다. 금액은 units 로 적습니다. units 는 AEGIS 의 가장 작은 단위로, 1 AEGIS = 1달러 = 1,000,000 units 입니다(USDC 와 같은 방식). 예를 들어 500000 은 0.5 AEGIS 입니다.
 
 ```bash
 # 우선순위를 직접 정해 보냄. Ollama 필요 없음
@@ -97,7 +97,7 @@ curl -s -X POST localhost:3100/api/purchase -H 'content-type: application/json' 
 | --- | --- | --- |
 | `prompt` | 예 | 요청 문장 |
 | `budgetUnits` | 예 | 예산(0 이상 정수). 선택에서 거르지는 않고 기록에 남김 |
-| `priority` | 아니오 | `price`·`speed`·`intelligence`·`default`. 비우면 Qwen 이 정함 |
+| `priority` | 아니오 | `price`·`speed`·`intelligence`. 비우면 Qwen 이 문장을 읽고 정함(`default` 를 직접 보낼 수도 있음) |
 | `requestId` | 아니오 | 요청 번호. 같은 요청을 다시 보낼 때 같은 값. 비우면 서버가 만듦 |
 | `userId` | 아니오 | 요청한 사용자 |
 | `maxOutputTokens` | 아니오 | 최대 출력 토큰(기본 8000). 금액 계산에 씀 |
@@ -140,7 +140,7 @@ BEFORE_PAYMENT_CHECKS.push(async (ctx) => {
 | `BEFORE_PAYMENT_CHECKS` | 모델을 고르고 처리 중 기록을 남긴 뒤, 송금 직전 | `ctx.request`, `ctx.decision`(고른 모델·금액·점수) | 송금하지 않고 `FAILED`·`before-send` 로 기록 |
 | `AFTER_PAYMENT_CHECKS` | 결과가 기록된 뒤 | 위 값 + 두 번째 인자 `record`(최종 상태) | 막을 수 없음. 오류는 알림으로 남고 결과는 그대로 |
 
-알림(`ctx.alert`)은 MongoDB `alerts` 컬렉션에 "경고"로 쌓입니다. 규칙이 막으면(`AuditBlockedError`) "차단" 알림이 자동으로 남으므로, 막을 때 따로 알림을 남기지 않아도 대시보드의 이상 거래에 뜹니다. 요청 직후에 막혀 구매 기록이 없는 경우도 요청 번호와 함께 남습니다. 동시에 들어온 요청끼리 겹치지 않게 하려면 확인과 기록을 MongoDB 의 원자적 연산(unique index, `findOneAndUpdate`)으로 한 번에 처리합니다. 프로그램 메모리 안의 잠금은 서버가 여러 개면 소용없습니다.
+알림(`ctx.alert`)은 MongoDB `alerts` 컬렉션에 "경고"로 쌓입니다. 규칙이 막으면(`AuditBlockedError`) "차단" 알림이 자동으로 남으므로, 막을 때 따로 알림을 남기지 않아도 대시보드의 이상 거래에 뜹니다. 요청 직후에 막혀 구매 기록이 없는 경우도 요청 번호와 함께 남습니다. 요청 두 개가 거의 동시에 오면 둘 다 "아직 한도 안 넘었네"라고 보고 둘 다 통과할 수 있습니다. 그래서 "확인"과 "기록"을 MongoDB 명령 하나로 같이 합니다. 예: `findOneAndUpdate`(조건이 맞을 때만 바꾸기), unique index(같은 값 두 번 저장 금지). 변수에 잠금을 거는 방식은 서버가 여러 대면 통하지 않습니다.
 
 ### 체인 규칙 (Solidity)
 
@@ -275,9 +275,14 @@ Next.js 15 (App Router) · React 19 · TypeScript · viem · MongoDB · Ollama(Q
 `scripts/capture-benchmark.mjs` 가 세 출처를 짝지어 판매 목록을 만듭니다. 추측하지 않습니다.
 
 - 세 출처의 모델 이름에서 기호를 빼고 소문자로 바꾼 값이 **정확히 같을 때만** 짝짓습니다.
-- 판매 단위는 기본 모델 하나입니다. 생각 단계(effort)는 고르지 않습니다.
+- 판매 단위는 기본 모델 하나입니다. 생각 단계(effort)는 고르지 않습니다(아래 "속도를 출력 속도로 재는 이유").
+- 값이 비거나 0 인 모델도 뺍니다. 빈칸을 기본값으로 채우지 않습니다.
+- **판매 최소 품질 기준**: ECI 140 미만은 팔지 않습니다(`MIN_ECI`, `src/lib/benchmark-sources.mjs`). 운영 판단으로 정한 값이며, 새 모델에도 같은 규칙이 적용됩니다.
+- 뺀 모델과 이유는 `data/catalog.json` 의 `excluded` 에 남습니다.
+- 필요 기능(`requiredCapabilities`)은 OpenRouter 가 알려 준 `reasoning`, `tools`, `vision` 입니다.
+- 판매자 주소는 회사별로 하나이며 `data/sellers.json` 에 있습니다. anvil 공개 테스트 계정이라 실제 자산이 없고, 처음 보는 회사에만 새 주소를 붙입니다.
 
-#### 속도를 출력 속도로 재는 이유 (생각 단계와 무관)
+### 속도를 출력 속도로 재는 이유 (생각 단계와 무관)
 
 요즘 모델은 같은 모델이라도 생각을 얼마나 깊게 할지(effort: `minimal`·`low`·`medium`·`high`·`xhigh`·`max`)를 고를 수 있고, AA 는 같은 모델을 이 단계별로 따로 잽니다. 그런데 AA 가 재는 단계는 모델마다 달라서(어떤 모델은 Low·High, 어떤 모델은 Medium·Max) 모든 모델을 같은 단계로 맞출 수 없습니다.
 
@@ -285,11 +290,6 @@ Next.js 15 (App Router) · React 19 · TypeScript · viem · MongoDB · Ollama(Q
 - **출력 속도**(1초에 내보내는 토큰 수)는 그 모델을 돌리는 서버의 빠르기라 단계와 거의 상관이 없습니다. 같은 19쌍에서 차이는 약 8%(중앙값)였습니다.
 
 그래서 속도는 출력 속도로 재고, AA 가 잰 단계들의 값을 평균내 씁니다. 단계를 고르지 않아도 되므로 단계가 여러 개인 모델도 모두 팔 수 있습니다. 따라서 "빠르게"는 "같은 양을 더 빨리 내보내는 모델"을 뜻합니다. 실제로 답이 끝나는 시간은 호출할 때 고르는 생각 단계에 따라 달라집니다.
-- 값이 비거나 0 인 모델도 뺍니다. 빈칸을 기본값으로 채우지 않습니다.
-- **판매 최소 품질 기준**: ECI 140 미만은 팔지 않습니다(`MIN_ECI`, `src/lib/benchmark-sources.mjs`). 운영 판단으로 정한 값이며, 새 모델에도 같은 규칙이 적용됩니다.
-- 뺀 모델과 이유는 `data/catalog.json` 의 `excluded` 에 남습니다.
-- 필요 기능(`requiredCapabilities`)은 OpenRouter 가 알려 준 `reasoning`, `tools`, `vision` 입니다.
-- 판매자 주소는 회사별로 하나이며 `data/sellers.json` 에 있습니다. anvil 공개 테스트 계정이라 실제 자산이 없고, 처음 보는 회사에만 새 주소를 붙입니다.
 
 ### 자동 갱신
 
@@ -312,11 +312,22 @@ node scripts/capture-benchmark.mjs          # data/catalog.json · benchmark.jso
 
 ## 기록 저장소
 
-구매 기록은 로컬 MongoDB의 `agent_m2m` 데이터베이스에 저장한다. 실행 전에 MongoDB가 떠 있어야 한다.
+기록은 로컬 MongoDB 의 `agent_m2m` 데이터베이스에 저장합니다. 실행 전에 MongoDB 가 켜져 있어야 합니다.
+
+| 컬렉션 | 담는 것 |
+| --- | --- |
+| `purchases` | 구매 기록(요청, 결정 근거, 결제, 결과, 상태) |
+| `alerts` | 이상 거래 알림(차단·경고) |
+| `snapshots` | 1시간마다 받아 온 벤치마크 숫자 |
+
+MongoDB 를 켜는 방법은 설치 방식에 따라 다릅니다.
 
 ```bash
-brew services start mongodb-community   # 꺼져 있을 때만
+brew services start mongodb-community   # macOS (Homebrew)
 ```
 
-접속 주소는 `MONGODB_URI`, 데이터베이스 이름은 `MONGODB_DB` 로 바꿀 수 있다.
-테스트는 `agent_m2m_test_...` 이름의 임시 데이터베이스를 만들고 끝나면 지운다.
+```bash
+sudo systemctl start mongod             # Linux (공식 패키지)
+```
+
+접속 주소는 `MONGODB_URI`, 데이터베이스 이름은 `MONGODB_DB` 로 바꿀 수 있습니다. 테스트는 `agent_m2m_test_...` 이름의 임시 데이터베이스를 만들고 끝나면 지웁니다.
