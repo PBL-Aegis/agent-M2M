@@ -15,7 +15,6 @@ vi.mock("../src/lib/provider", async (importOriginal) => {
 
 // 실행 중인 로컬 MongoDB에 테스트 전용 데이터베이스를 만들고 끝나면 통째로 지운다.
 process.env.MONGODB_DB = `agent_m2m_test_${Date.now()}_purchase`;
-process.env.AEGIS_PAYMENT_MODE = "mock";
 
 const store = await import("../src/lib/store");
 const audit = await import("../src/lib/audit");
@@ -44,7 +43,7 @@ describe("runPurchase", () => {
     expect(saved?.status).toBe("SETTLED");
     expect(saved?.requestId).toBe("req-1");
     expect(saved?.userId).toBe("user-1");
-    expect(saved?.payment?.txHash).toBe(`mock:${record.id}`);
+    expect(saved?.payment?.txHash).toMatch(/^0x[0-9a-f]{64}$/);
     expect(saved?.updatedAt).toBe(record.updatedAt);
   });
 
@@ -78,7 +77,7 @@ describe("runPurchase", () => {
     const saved = await store.getPurchase(record.id);
     expect(saved?.status).toBe("FAILED");
     expect(saved?.failureStage).toBe("after-send");
-    expect(saved?.payment?.txHash).toBe(`mock:${record.id}`);
+    expect(saved?.payment?.txHash).toMatch(/^0x[0-9a-f]{64}$/);
   });
 
   it("요청 직후 규칙이 이전 기록을 돌려주면 새로 처리하지 않고 그 기록을 돌려준다", async () => {

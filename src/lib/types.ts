@@ -201,8 +201,8 @@ export interface Decision {
   winner: ScoredCandidate;
 }
 
-/** local 은 이 컴퓨터의 anvil, live 는 Base Sepolia, mock 은 체인 없이 흐름만 잇는 자동 테스트용. */
-export type PaymentMode = "mock" | "local" | "live";
+/** local 은 이 컴퓨터의 anvil(자동 테스트 포함), live 는 Base Sepolia. 예전 기록에는 체인 없이 흐름만 잇던 "mock" 이 남아 있을 수 있다. */
+export type PaymentMode = "local" | "live";
 
 export interface PaymentResult {
   mode: PaymentMode;

@@ -4,10 +4,10 @@
  * 그래서 live 는 pay 가 있는 토큰(contracts/src/AegisToken.sol)을 배포한 주소에서만 동작한다.
  *
  * 기본값은 local 이다. 이 컴퓨터의 anvil(npm run chain)에 올린 토큰으로 보낸다. 실제 자산은 오가지 않는다.
+ * 자동 테스트(npm test)도 테스트 전용 anvil(AEGIS_LOCAL_RPC_URL)을 띄워 같은 local 경로로 진짜 결제한다.
  * Base Sepolia 전송은 두 가지가 모두 켜져 있을 때만 일어난다.
  *   AEGIS_PAYMENT_MODE=live
  *   AEGIS_REAL_PAYMENT_APPROVED=yes
- * AEGIS_PAYMENT_MODE=mock 은 체인 없이 흐름만 이어 가는 자동 테스트용이다.
  * 개인키는 이 파일 안에서만 읽고, 밖으로 내보내지 않는다. 화면과 기록에는 주소만 남는다.
  */
 
@@ -85,7 +85,18 @@ export const AEGIS_ABI = [
 
 /** anvil 이 띄울 때마다 똑같이 만드는 공개 테스트 계정. 로컬 체인에서만 쓰고, 실제 자산은 없다. */
 const ANVIL_MNEMONIC = "test test test test test test test test test test test junk";
-export const LOCAL_RPC_URL = "http://127.0.0.1:8545";
+const DEFAULT_LOCAL_RPC_URL = "http://127.0.0.1:8545";
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
+
+/** 로컬 체인 주소. 자동 테스트는 개발용 체인과 부딪치지 않게 다른 포트를 쓴다. 이 컴퓨터 주소만 받는다. */
+export function localRpcUrl(): string {
+  const value = (process.env.AEGIS_LOCAL_RPC_URL ?? DEFAULT_LOCAL_RPC_URL).trim();
+  const url = new URL(value);
+  if (!LOOPBACK_HOSTS.has(url.hostname)) {
+    throw new PaymentError(`AEGIS_LOCAL_RPC_URL 은 이 컴퓨터 주소(127.0.0.1)여야 합니다: ${value}`);
+  }
+  return value;
+}
 
 /** 0번 계정은 운영자(토큰 배포·발급), 1번 계정은 구매자다. scripts/local-chain.mjs 도 같은 계정을 쓴다. */
 export function localAccounts() {
@@ -135,14 +146,13 @@ function requiredEnv(name: string): string {
 export function paymentConfig(): PaymentConfig {
   const approved = process.env.AEGIS_REAL_PAYMENT_APPROVED === "yes";
   const requested = (process.env.AEGIS_PAYMENT_MODE ?? "local").trim().toLowerCase();
-  const mode: PaymentMode =
-    requested === "live" && approved ? "live" : requested === "mock" ? "mock" : "local";
+  const mode: PaymentMode = requested === "live" && approved ? "live" : "local";
   if (mode === "local") {
     return {
       mode,
       tokenAddress: localTokenAddress(),
       chainId: foundry.id,
-      rpcUrl: LOCAL_RPC_URL,
+      rpcUrl: localRpcUrl(),
       buyerAddress: localAccounts().buyer.address,
     };
   }
@@ -163,8 +173,15 @@ function chainOf(config: PaymentConfig) {
   return config.mode === "live" ? baseSepolia : foundry;
 }
 
+/** 로컬 체인은 거래를 바로 블록에 넣으므로 결과를 짧은 간격으로 확인한다. live 는 viem 기본값(4초)을 쓴다. */
+const LOCAL_POLLING_MS = 100;
+
 export function publicClient(config: PaymentConfig) {
-  return createPublicClient({ chain: chainOf(config), transport: http(config.rpcUrl) });
+  return createPublicClient({
+    chain: chainOf(config),
+    transport: http(config.rpcUrl),
+    ...(config.mode === "local" ? { pollingInterval: LOCAL_POLLING_MS } : {}),
+  });
 }
 
 /** 대시보드에 보여줄 구매 에이전트 지갑의 AEGIS 잔액. 조회하지 못하면 units는 null이고 사유를 남긴다. */
@@ -186,6 +203,17 @@ export async function buyerBalance(): Promise<{ units: number | null; status: st
   }
 }
 
+/**
+ * 같은 지갑으로 거의 동시에 보내면 거래 순번(nonce)이 겹쳐 뒤의 거래가 거절된다.
+ * 이 프로세스 안에서는 보내기를 한 줄로 세워, 앞 거래가 체인에 들어간 뒤 다음 거래가 순번을 받게 한다.
+ */
+let sending: Promise<unknown> = Promise.resolve();
+function oneAtATime<T>(send: () => Promise<T>): Promise<T> {
+  const run = sending.then(send, send);
+  sending = run.catch(() => undefined);
+  return run;
+}
+
 export async function pay(args: {
   amountUnits: number;
   recipient: string;
@@ -195,20 +223,6 @@ export async function pay(args: {
   const config = paymentConfig();
   const to = getAddress(args.recipient);
   const requestHash = requestIdHash(args.requestId);
-
-  if (config.mode === "mock") {
-    // 실제 전송 없이 흐름만 이어간다. 기록에 mock임을 분명히 남긴다.
-    return {
-      mode: "mock",
-      txHash: `mock:${args.purchaseId}`,
-      from: config.buyerAddress ?? "0xmock",
-      to,
-      amountUnits: args.amountUnits,
-      tokenAddress: config.tokenAddress || "0xmock",
-      chainId: config.chainId,
-      requestIdHash: requestHash,
-    };
-  }
 
   const live = config.mode === "live";
   const token = getAddress(live ? requiredEnv("AEGIS_TOKEN_ADDRESS") : config.tokenAddress);
@@ -234,12 +248,14 @@ export async function pay(args: {
     );
   }
 
-  const txHash = await wallet.writeContract({
-    address: token,
-    abi: AEGIS_ABI,
-    functionName: "pay",
-    args: [to, BigInt(args.amountUnits), requestHash],
-  });
+  const txHash = await oneAtATime(() =>
+    wallet.writeContract({
+      address: token,
+      abi: AEGIS_ABI,
+      functionName: "pay",
+      args: [to, BigInt(args.amountUnits), requestHash],
+    }),
+  );
   // 여기부터는 거래가 체인에 나간 뒤다. 어떤 실패든 송금 후 실패로 알린다.
   let receipt;
   try {
