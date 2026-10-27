@@ -5,12 +5,13 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 import {PaymentRules} from "./rules/PaymentRules.sol";
+import {ReplayRule} from "./rules/ReplayRule.sol";
 
 /// @title AEGIS 토큰
 /// @notice 구매 에이전트가 모델 값을 치르는 ERC-20. 소수점 6자리.
 /// 구매 결제는 transfer 가 아니라 pay 로 한다. pay 는 요청 번호를 함께 받고, 송금 전에 감사 규칙을 돌린다.
 /// 감사 규칙은 contracts/src/rules/ 에 파일로 따로 두고, 아래 상속 목록과 _checkPayment 의 override 목록에 이름만 더한다.
-contract AegisToken is ERC20, Ownable, PaymentRules {
+contract AegisToken is ERC20, Ownable, PaymentRules, ReplayRule {
     /// @notice 구매 결제 한 건. 판매창구는 이 이벤트로 요청 번호·수신자·금액을 대조한다.
     event Paid(bytes32 indexed requestId, address indexed from, address indexed to, uint256 amount);
 
@@ -35,7 +36,7 @@ contract AegisToken is ERC20, Ownable, PaymentRules {
     function _checkPayment(address from, address to, uint256 amount, bytes32 requestId)
         internal
         virtual
-        override(PaymentRules)
+        override(PaymentRules, ReplayRule)
     {
         super._checkPayment(from, to, amount, requestId);
     }
