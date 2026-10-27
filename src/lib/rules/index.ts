@@ -7,3 +7,5 @@
  */
 
 export {};
+
+import "./replay";

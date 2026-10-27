@@ -184,6 +184,11 @@ contract AegisToken is ERC20, Ownable, PaymentRules, MaxAmountRule {
 
 `npm run chain` 을 다시 켜면 규칙이 담긴 토큰이 로컬 체인에 올라가고, 화면에서 막힌 결제는 송금 전 실패로 보입니다.
 
+### 등록된 규칙
+
+- **replay** (재전송·연타, `src/lib/rules/replay.ts`, `contracts/src/rules/ReplayRule.sol`): 같은 요청 번호는 한 번만 결제합니다. 다시 오면 요청 직후 기록 없이 409(`rule: "replay"`), 체인에서는 `RequestIdReused` 로 revert.
+  한 사용자(체인에서는 구매자 지갑)가 `AUDIT_REPLAY_WINDOW_SECONDS`(기본 60)초 안에 `AUDIT_REPLAY_MAX_PAYMENTS`(기본 5)건을 넘겨 결제하면 송금 전에 막혀 `FAILED`·`before-send`(`rule: "replay-rate"`), 체인에서는 `TooManyPayments` 로 revert. 체인 값은 운영자가 `setReplayLimit` 로 바꿉니다.
+
 ### 테스트로 증명하기
 
 공격을 재현하는 테스트가 통과하면 "막힌다"가 증명됩니다. 서버는 `tests/`, 체인은 `contracts/test/` 에 둡니다.
