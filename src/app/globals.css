@@ -370,7 +370,7 @@ button.link {
 }
 .auditMetrics {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   margin: 0 0 20px;
   border: 1px solid var(--line);
   border-radius: 17px;
@@ -426,12 +426,63 @@ td.requestCell > a {
 .empty { padding: 44px 20px; text-align: center; color: var(--muted); }
 .pageHead { margin: 12px 0 28px; }
 .pageHead p { max-width: 720px; color: var(--muted); margin: 0; line-height: 1.6; }
+.riskText { color: var(--red); }
+.auditLayout { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 20px; align-items: start; }
+.clearState {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 15px;
+  border: 1px solid #27513f;
+  border-radius: 13px;
+  background: rgba(23, 53, 43, 0.55);
+}
+.clearState > span {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  color: var(--green);
+  background: #123227;
+}
+.compactAlerts { display: flex; flex-direction: column; }
+.compactAlerts > div {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 11px;
+  align-items: start;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--line);
+}
+.compactAlerts > div:last-child { border-bottom: 0; }
+.compactAlerts span:last-child { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.compactAlerts a, .compactAlerts b { font-size: 13px; font-weight: 720; text-decoration: none; overflow-wrap: anywhere; }
+.alertList { display: flex; flex-direction: column; gap: 12px; }
+.alert {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 16px;
+}
+.alert h2 { font-size: 17px; margin: 0 0 7px; overflow-wrap: anywhere; }
+.alert div > small { display: block; margin-top: 4px; }
+.alert > a { font-size: 12px; text-decoration: none; white-space: nowrap; }
+.alert > .badge { justify-self: start; }
+
+@media (max-width: 1040px) {
+  .auditMetrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .auditMetrics article:nth-child(2) { border-right: 0; }
+  .auditMetrics article:nth-child(-n + 2) { border-bottom: 1px solid var(--line); }
+  .auditLayout { grid-template-columns: minmax(0, 1fr); }
+}
 
 @media (max-width: 620px) {
   .auditMetrics { grid-template-columns: minmax(0, 1fr); }
   .auditMetrics article { min-height: 125px; border-right: 0; border-bottom: 1px solid var(--line); }
   .auditMetrics article:last-child { border-bottom: 0; }
   .panel table { min-width: 560px; }
+  .alert { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (max-width: 720px) {
