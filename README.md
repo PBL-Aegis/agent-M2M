@@ -81,7 +81,9 @@ cd contracts && forge test  # 컨트랙트 테스트
 
 ## 요청 보내기
 
-화면 대신 에이전트처럼 API 로 보낼 수 있습니다. 금액은 units 로 적습니다. units 는 AEGIS 의 가장 작은 단위로, 1 AEGIS = 1달러 = 1,000,000 units 입니다(USDC 와 같은 방식). 예를 들어 500000 은 0.5 AEGIS 입니다.
+화면 대신 에이전트처럼 API 로 보낼 수 있습니다. 금액은 units 로 적습니다.
+
+**units 가 있는 이유**: 블록체인은 소수점을 저장할 수 없어서, 토큰 금액을 정수로만 셉니다. AEGIS 는 소수점 6자리라 0.16 AEGIS 를 160000 이라는 정수로 저장하는데, 이 정수 단위를 units 라고 부릅니다. 은행이 1,000.50달러를 내부에서 100,050센트로 다루는 것과 같습니다. 1 AEGIS = 1달러 = 1,000,000 units 이고, USDC 도 같은 방식입니다. 화면에는 AEGIS 로만 보이고, API 와 코드 안에서만 units 를 씁니다. 예를 들어 `budgetUnits: 500000` 은 0.5 AEGIS 입니다.
 
 ```bash
 # 우선순위를 직접 정해 보냄. Ollama 필요 없음
@@ -180,13 +182,22 @@ contract AegisToken is ERC20, Ownable, PaymentRules, MaxAmountRule {
 
 ### 테스트로 증명하기
 
-공격을 재현하는 테스트가 통과하면 "막힌다"가 증명됩니다. 서버는 `tests/`, 체인은 `contracts/test/` 에 둡니다. 서버 규칙 테스트는 `tests/purchase.test.ts` 처럼 `runPurchase` 를 불러 기록의 `status`·`failureStage`·알림을 확인합니다. 결제는 테스트용 로컬 체인에 진짜로 나갑니다.
+공격을 재현하는 테스트가 통과하면 "막힌다"가 증명됩니다. 서버는 `tests/`, 체인은 `contracts/test/` 에 둡니다.
+
+**서버 테스트(`npm test`)**
+- `tests/purchase.test.ts` 처럼 `runPurchase` 를 불러 기록의 `status`·`failureStage`·알림을 확인합니다. 결제는 테스트용 로컬 체인에 진짜로 나가고, 세 사람의 체인 규칙이 모두 들어간 진짜 토큰을 거칩니다.
+- **테스트마다 체인이 처음 상태로 돌아갑니다**(배포 직후, 구매자 1000 AEGIS, 한도·요청 번호 기록 없음). 한 테스트 안에서는 결제가 정상적으로 쌓입니다. 직접 할 일은 없고 `tests/setup/chain-snapshot.ts` 가 자동으로 합니다.
+- 체인 시계를 앞으로 돌려야 하면(60초 뒤, 하루 뒤) `tests/helpers/chain.ts` 의 `increaseChainTime(초)` 를 씁니다.
+- 서버 쪽 기록(MongoDB)은 테스트 파일마다 새 임시 DB 를 쓰지만, 한 파일 안의 테스트끼리는 이어집니다. 테스트마다 다른 `userId`·`requestId` 를 쓰면 서로 섞이지 않습니다.
+- 다른 사람의 규칙이 합쳐져도 깨지지 않게, "몇 건이 성공했나"보다 **"내 규칙 이름으로 막혔나"**(차단 알림의 `rule`, 실패 이유)를 확인합니다. 예를 들어 한 테스트 안에서 결제를 6건 넘게 보내면 다른 사람의 "60초에 5건" 체인 규칙에 먼저 걸릴 수 있습니다.
+
+**Solidity 테스트(`forge test`)**: 테스트 파일 안에 "AEGIS + 내 규칙만" 붙인 작은 토큰을 정의해서 시험합니다(`contracts/test/AegisToken.t.sol` 의 `RuledToken` 예시). 시간은 `vm.warp` 로 돌립니다.
 
 ## 테스트가 확인하는 것
 
 | 명령 | 진짜로 도는 것 | 가짜로 바꾼 것 | 확인하지 않는 것 |
 | --- | --- | --- | --- |
-| `npm test` | 선택·점수 계산, 감사 규칙 자리와 알림, 기록(임시 MongoDB), 짝짓기 규칙, **로컬 체인 결제와 판매창구 확인** | Qwen 응답, 세 벤치마크 사이트 응답, 벤치마크 숫자(`tests/fixtures/`) | Qwen 이 문장을 맞게 읽는지, 실제 사이트 값 |
+| `npm test` | 선택·점수 계산, 감사 규칙 자리와 알림, 기록(임시 MongoDB), 짝짓기 규칙, **로컬 체인 결제·체인 규칙·판매창구 확인**(테스트마다 체인을 처음 상태로 되돌림) | Qwen 응답, 세 벤치마크 사이트 응답, 벤치마크 숫자(`tests/fixtures/`) | Qwen 이 문장을 맞게 읽는지, 실제 사이트 값 |
 | `forge test` | 컨트랙트(발급, `pay`, 규칙이 `pay` 를 막는지) | 없음(메모리 안의 체인) | 서버와 이어진 흐름 |
 | `npm run chain` + `npm run dev` 후 요청 | 전체 흐름: 서버 규칙, 로컬 체인 결제·체인 규칙, 판매창구 확인 | 모델 응답(Mock 문장) | Base Sepolia 결제 |
 | 위 + Ollama 켜고 우선순위 비워 요청 | Qwen 의 우선순위 판단까지 | 모델 응답(Mock 문장) | Base Sepolia 결제 |
@@ -194,7 +205,7 @@ contract AegisToken is ERC20, Ownable, PaymentRules, MaxAmountRule {
 
 ## 스마트 컨트랙트
 
-`contracts/` 는 Foundry 프로젝트입니다. 체인에서는 구매자 지갑 하나를 사용자 한 명으로 봅니다. `AegisToken` 은 소수점 6자리 ERC-20이며 운영자만 새로 발급합니다. 구매 결제는 `pay` 로 하며, `pay` 는 송금 전에 감사 규칙을 돌리고 `Paid(요청 번호, 보낸 쪽, 받는 쪽, 금액)` 이벤트를 남깁니다.
+`contracts/` 는 Foundry 프로젝트입니다. 체인에서는 구매자 지갑 하나를 사용자 한 명으로 봅니다. `AegisToken` 은 소수점 6자리 ERC-20이며(1 AEGIS = 1달러 = 1,000,000 units, 위 "요청 보내기"의 units 설명) 운영자만 새로 발급합니다. 구매 결제는 `pay` 로 하며, `pay` 는 송금 전에 감사 규칙을 돌리고 `Paid(요청 번호, 보낸 쪽, 받는 쪽, 금액)` 이벤트를 남깁니다.
 
 감사 규칙은 `contracts/src/rules/` 에 파일로 따로 둡니다. 규칙은 `PaymentRules` 를 상속해 `_checkPayment` 를 덮어쓰고, 먼저 `super._checkPayment(...)` 를 부른 뒤 막을 때 revert 합니다. `AegisToken` 에는 상속 목록과 `_checkPayment` 의 override 목록에 규칙 이름만 더합니다.
 
@@ -227,7 +238,7 @@ contract AegisToken is ERC20, Ownable, PaymentRules, MaxAmountRule {
 | `local` (기본) | 이 컴퓨터의 anvil | `npm run chain` 을 켜 둠 |
 | `live` | Base Sepolia | 아래 두 변수, 개인키, `pay` 가 있는 토큰 주소 |
 
-자동 테스트(`npm test`)도 `local` 로 결제합니다. 시작할 때 테스트 전용 로컬 체인(8546)을 스스로 켜고 끝나면 끄므로, 개발용 `npm run chain`(8545)을 켜 둔 채로 돌려도 됩니다. 같은 구매자 지갑을 쓰므로 테스트 파일은 하나씩 돕니다.
+자동 테스트(`npm test`)도 `local` 로 결제합니다. 시작할 때 테스트 전용 로컬 체인(8546)을 스스로 켜고 끝나면 끄므로, 개발용 `npm run chain`(8545)을 켜 둔 채로 돌려도 됩니다. 같은 구매자 지갑을 쓰므로 테스트 파일은 하나씩 돌고, 테스트마다 체인을 처음 상태로 되돌립니다.
 
 `local` 은 감사 규칙이 담긴 컨트랙트를 그대로 올려 쓰므로, 체인에서 막히는 것까지 화면에서 확인할 수 있습니다. `npm run chain` 을 끄면 체인과 그 위의 잔액도 사라지고, 다시 켜면 빈 체인에 같은 주소로 새로 배포합니다. 계정은 anvil 의 공개 테스트 계정(0번 운영자, 1번 구매자)이라 실제 자산이 없습니다.
 

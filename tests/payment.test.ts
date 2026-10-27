@@ -62,3 +62,14 @@ describe("paymentConfig", () => {
     }
   });
 });
+
+describe("테스트마다 체인 되돌리기", () => {
+  it("앞 테스트에서 쓴 금액은 다음 테스트에 남지 않는다 (1/2: 쓰기)", async () => {
+    await pay({ amountUnits: 500_000, recipient: RECIPIENT, purchaseId: "spend", requestId: "spend" });
+    expect((await buyerBalance()).units).toBe(999_500_000);
+  });
+
+  it("앞 테스트에서 쓴 금액은 다음 테스트에 남지 않는다 (2/2: 확인)", async () => {
+    expect((await buyerBalance()).units).toBe(1_000_000_000);
+  });
+});
