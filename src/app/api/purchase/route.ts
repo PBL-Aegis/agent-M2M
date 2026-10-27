@@ -1,7 +1,8 @@
 /**
  * POST /api/purchase — 요청 한 건을 받아 선택·결제·확인·결과·기록까지 돌린다.
  *
- * 입력은 여기서 모양만 검사한다(문자열인지, 정수인지, 네 우선순위 중 하나인지).
+ * 입력은 여기서 모양만 검사한다(문자열인지, 금액 형식인지, 네 우선순위 중 하나인지).
+ * 예산(budget)은 사람이 적는 값이라 AEGIS 로 받고(예: "0.5"), 여기서 최소 단위(units)로 바꾼다.
  * 우선순위는 빼도 된다. 빼면 로컬 Qwen 이 요청 문장을 보고 정한다.
  * requestId·userId 도 빼도 된다. requestId 를 빼면 서버가 새로 만든다.
  * 예산 부족 같은 판단은 select.ts 가 하고, 그 결과는 400 이 아니라 기록으로 남는다.
@@ -10,6 +11,7 @@
 import { NextResponse } from "next/server";
 
 import { AuditBlockedError } from "@/lib/audit";
+import { parseAegis } from "@/lib/format";
 import { PriorityInferenceError } from "@/lib/priority-llm";
 import { runPurchase } from "@/lib/purchase";
 import { SelectionError } from "@/lib/select";
@@ -30,10 +32,9 @@ function parseBody(body: unknown): PurchaseInput | string {
   const prompt = input.prompt;
   if (typeof prompt !== "string" || prompt.trim() === "") return "prompt 는 비어 있지 않은 문자열이어야 합니다";
 
-  const budgetUnits = input.budgetUnits;
-  if (typeof budgetUnits !== "number" || !Number.isInteger(budgetUnits) || budgetUnits < 0) {
-    return "budgetUnits 는 0 이상의 정수여야 합니다";
-  }
+  if (input.budgetUnits !== undefined) return "budgetUnits 대신 budget 에 AEGIS 금액을 보내세요 (예: \"0.5\")";
+  const budgetUnits = parseAegis(input.budget);
+  if (budgetUnits === null) return "budget 은 0 이상의 AEGIS 금액이어야 합니다 (예: \"0.5\", 소수점 6자리까지)";
 
   const request: PurchaseInput = { prompt, budgetUnits };
 

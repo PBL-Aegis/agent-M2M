@@ -22,3 +22,15 @@ export function aegisText(units: number): string {
 export function toUnits(aegis: number): number {
   return Math.round(aegis * UNITS_PER_AEGIS);
 }
+
+/**
+ * 사람이 적은 AEGIS 금액("0.5", 0.5) → 최소 단위 정수. 소수점 오차가 없도록 문자열 자릿수로 바꾼다.
+ * 0 이상이고 소수점 6자리까지만 받는다. 형식이 틀리면 null.
+ */
+export function parseAegis(value: unknown): number | null {
+  const text = typeof value === "number" ? String(value) : typeof value === "string" ? value.trim() : "";
+  const match = /^(\d+)(?:\.(\d{1,6}))?$/.exec(text);
+  if (match === null) return null;
+  const [, whole, fraction = ""] = match;
+  return Number(whole) * UNITS_PER_AEGIS + Number(fraction.padEnd(6, "0"));
+}

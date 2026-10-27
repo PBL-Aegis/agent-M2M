@@ -11,7 +11,7 @@ import Link from "next/link";
 import { useState, type FormEvent } from "react";
 
 import { CandidateTables, PurchaseSummary } from "@/components/DecisionView";
-import { toAegis, toUnits } from "@/lib/format";
+import { parseAegis, toAegis } from "@/lib/format";
 import { PRIORITY_LABEL } from "@/lib/priority-label";
 import { PRIORITIES, type PurchaseRecord } from "@/lib/types";
 
@@ -44,8 +44,7 @@ export function ChatPanel() {
     event.preventDefault();
     const text = prompt.trim();
     if (text === "" || busy) return;
-    const budgetUnits = toUnits(Number(budget));
-    if (!Number.isFinite(budgetUnits) || budgetUnits < 0) return;
+    if (parseAegis(budget) === null) return;
 
     const id = Date.now();
     setTurns((prev) => [...prev, { id, prompt: text, record: null, error: null }]);
@@ -55,7 +54,7 @@ export function ChatPanel() {
       const response = await fetch("/api/purchase", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ prompt: text, budgetUnits, ...(priority === AUTO ? {} : { priority }) }),
+        body: JSON.stringify({ prompt: text, budget: budget.trim(), ...(priority === AUTO ? {} : { priority }) }),
       });
       const body = (await response.json()) as PurchaseRecord | { error: string };
       setTurns((prev) =>
