@@ -25,7 +25,8 @@ AI 구매 에이전트가 벤치마크 표를 보고 모델 하나를 고른 뒤
 | `/` | 새 구매 요청 |
 | `/dashboard` | 요약 · 최근 기록 · 구매자 지갑 잔액 |
 | `/dashboard/purchases` | 전체 요청·결제 기록 |
-| `/dashboard/[id]` | 기록 한 건의 결정 근거 |
+| `/dashboard/alerts` | 이상 거래: 감사 규칙이 막은 거래(차단)와 경고 |
+| `/dashboard/[id]` | 기록 한 건의 결정 근거와 그 거래의 이상 거래 알림 |
 
 ## 처음 시작하기
 
@@ -139,7 +140,7 @@ BEFORE_PAYMENT_CHECKS.push(async (ctx) => {
 | `BEFORE_PAYMENT_CHECKS` | 모델을 고르고 처리 중 기록을 남긴 뒤, 송금 직전 | `ctx.request`, `ctx.decision`(고른 모델·금액·점수) | 송금하지 않고 `FAILED`·`before-send` 로 기록 |
 | `AFTER_PAYMENT_CHECKS` | 결과가 기록된 뒤 | 위 값 + 두 번째 인자 `record`(최종 상태) | 막을 수 없음. 오류는 알림으로 남고 결과는 그대로 |
 
-알림(`ctx.alert`)은 MongoDB `alerts` 컬렉션에 쌓입니다. 동시에 들어온 요청끼리 겹치지 않게 하려면 확인과 기록을 MongoDB 의 원자적 연산(unique index, `findOneAndUpdate`)으로 한 번에 처리합니다. 프로그램 메모리 안의 잠금은 서버가 여러 개면 소용없습니다.
+알림(`ctx.alert`)은 MongoDB `alerts` 컬렉션에 "경고"로 쌓입니다. 규칙이 막으면(`AuditBlockedError`) "차단" 알림이 자동으로 남으므로, 막을 때 따로 알림을 남기지 않아도 대시보드의 이상 거래에 뜹니다. 요청 직후에 막혀 구매 기록이 없는 경우도 요청 번호와 함께 남습니다. 동시에 들어온 요청끼리 겹치지 않게 하려면 확인과 기록을 MongoDB 의 원자적 연산(unique index, `findOneAndUpdate`)으로 한 번에 처리합니다. 프로그램 메모리 안의 잠금은 서버가 여러 개면 소용없습니다.
 
 ### 체인 규칙 (Solidity)
 

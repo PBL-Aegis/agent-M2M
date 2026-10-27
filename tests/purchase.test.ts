@@ -120,4 +120,49 @@ describe("runPurchase", () => {
       "되돌리기 실패",
     );
   });
+
+  it("송금 직전 규칙이 막으면 단계·요청 번호와 함께 차단 알림이 자동으로 남는다", async () => {
+    audit.BEFORE_PAYMENT_CHECKS.push(async () => {
+      throw new audit.AuditBlockedError("limit-test", "한도 초과");
+    });
+    const record = await runPurchase({ ...input, requestId: "req-block", userId: "user-b" });
+    const alerts = await store.listAlertsForPurchase(record.id);
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toMatchObject({
+      rule: "limit-test",
+      message: "한도 초과",
+      blocked: true,
+      stage: "before-payment",
+      requestId: "req-block",
+      userId: "user-b",
+    });
+    expect((await store.existingPurchaseIds([record.id, "no-such-id"])).has(record.id)).toBe(true);
+  });
+
+  it("요청 직후 규칙이 막으면 구매 기록 없이 차단 알림만 남는다", async () => {
+    audit.ON_REQUEST_CHECKS.push(async () => {
+      throw new audit.AuditBlockedError("replay-test", "처리 중인 요청");
+    });
+    const before = await store.countAlerts();
+    await expect(runPurchase({ ...input, requestId: "req-early" })).rejects.toBeInstanceOf(audit.AuditBlockedError);
+    const alert = (await store.listAlerts()).find((item) => item.requestId === "req-early")!;
+    expect(alert).toMatchObject({ rule: "replay-test", blocked: true, stage: "on-request" });
+    expect((await store.existingPurchaseIds([alert.purchaseId])).size).toBe(0);
+    const after = await store.countAlerts();
+    expect(after.blocked).toBe(before.blocked + 1);
+    expect(after.warnings).toBe(before.warnings);
+  });
+
+  it("ctx.alert 로 남긴 알림은 막지 않는 경고로 센다", async () => {
+    audit.BEFORE_PAYMENT_CHECKS.push(async (ctx) => {
+      await ctx.alert("near-limit", "한도의 80% 이상");
+    });
+    const before = await store.countAlerts();
+    const record = await runPurchase(input);
+    expect(record.status).toBe("SETTLED");
+    expect(await store.listAlertsForPurchase(record.id)).toMatchObject([
+      { rule: "near-limit", blocked: false, stage: "before-payment" },
+    ]);
+    expect((await store.countAlerts()).warnings).toBe(before.warnings + 1);
+  });
 });

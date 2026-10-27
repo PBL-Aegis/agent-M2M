@@ -98,6 +98,29 @@ export async function listAlerts(limit = 50): Promise<AuditAlert[]> {
   return documents.map(({ _id, ...rest }) => ({ id: _id, ...rest }));
 }
 
+/** 구매 한 건에 달린 알림. 오래된 것부터. */
+export async function listAlertsForPurchase(purchaseId: string): Promise<AuditAlert[]> {
+  const documents = await (await alerts()).find({ purchaseId }, { sort: { createdAt: 1, _id: 1 } }).toArray();
+  return documents.map(({ _id, ...rest }) => ({ id: _id, ...rest }));
+}
+
+/** 전체 알림을 차단과 경고로 나눠 센다. blocked 칸이 없는 옛 알림은 경고로 센다. */
+export async function countAlerts(): Promise<{ blocked: number; warnings: number }> {
+  const collection = await alerts();
+  const [blocked, total] = await Promise.all([
+    collection.countDocuments({ blocked: true }),
+    collection.countDocuments({}),
+  ]);
+  return { blocked, warnings: total - blocked };
+}
+
+/** 주어진 구매 번호 중 실제 기록이 있는 것. 요청 직후에 막힌 알림은 기록이 없어 링크를 달지 않는다. */
+export async function existingPurchaseIds(ids: string[]): Promise<Set<string>> {
+  if (ids.length === 0) return new Set();
+  const documents = await (await purchases()).find({ _id: { $in: ids } }, { projection: { _id: 1 } }).toArray();
+  return new Set(documents.map((document) => document._id));
+}
+
 export async function listPurchases(limit = 50): Promise<PurchaseRecord[]> {
   const documents = await (await purchases())
     .find({}, { sort: { createdAt: -1, _id: -1 }, limit })

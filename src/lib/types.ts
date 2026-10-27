@@ -242,12 +242,23 @@ export interface PurchaseRecord {
   failureStage?: FailureStage;
 }
 
-/** 감사 규칙이 남긴 알림. 결제를 막지 않는 경고도 여기에 쌓인다. */
+/** 감사 규칙이 어느 자리에서 돌았는지. */
+export type AuditStage = "on-request" | "before-payment" | "after-payment";
+
+/**
+ * 감사 규칙이 남긴 알림. 대시보드의 "이상 거래"가 이 목록을 보여준다.
+ * 규칙이 결제를 막으면 blocked 가 true 인 알림이 자동으로 남고, ctx.alert 로 남긴 경고는 false 다.
+ */
 export interface AuditAlert {
   id: string;
   createdAt: string;
+  /** 요청 직후에 막힌 경우에는 이 번호의 구매 기록이 없다. */
   purchaseId: string;
   userId: string | null;
+  /** 이 칸들이 생기기 전 알림에는 없다. */
+  requestId?: string;
+  stage?: AuditStage;
+  blocked?: boolean;
   /** 알림을 남긴 규칙 이름. */
   rule: string;
   message: string;
