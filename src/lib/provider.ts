@@ -19,13 +19,6 @@ export async function verifyPayment(
   winner: ScoredCandidate,
   requestId: string,
 ): Promise<void> {
-  if (payment.mode === "mock") {
-    if (!payment.txHash.startsWith("mock:")) {
-      throw new DeliveryError("mock 결제인데 거래번호 형식이 다릅니다");
-    }
-    return;
-  }
-
   const config = paymentConfig();
   const reader = publicClient(config);
   const receipt = await reader.getTransactionReceipt({ hash: payment.txHash as `0x${string}` });

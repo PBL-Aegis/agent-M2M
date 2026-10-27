@@ -36,7 +36,7 @@ AI 구매 에이전트가 벤치마크 표를 보고 모델 하나를 고른 뒤
 | --- | --- | --- |
 | Node.js 22 | 앱 실행·테스트 | 필요 |
 | MongoDB | 구매 기록 저장. 자동 테스트도 임시 DB를 만들어 씀 | 필요 |
-| [Foundry](https://getfoundry.sh) (`forge`, `anvil`) | 컨트랙트 빌드·테스트, 로컬 체인 | 필요 |
+| [Foundry](https://getfoundry.sh) (`forge`, `anvil`) | 컨트랙트 빌드·테스트, 로컬 체인(`npm test` 도 씀) | 필요 |
 | [Ollama](https://ollama.com) + `qwen3.5:4b` | 우선순위를 비운 요청에서 요청 문장을 읽고 우선순위를 정함 | 선택 |
 
 ### 2. 받고 준비하기
@@ -73,7 +73,7 @@ ollama pull qwen3.5:4b    # 한 번만. 약 3.3GB
 ### 5. 확인 명령
 
 ```bash
-npm test                    # 서버 자동 테스트 (vitest)
+npm test                    # 서버 자동 테스트 (vitest). 테스트용 로컬 체인을 스스로 켜고 끈다
 npm run typecheck
 npm run build
 cd contracts && forge test  # 컨트랙트 테스트
@@ -180,13 +180,13 @@ contract AegisToken is ERC20, Ownable, PaymentRules, MaxAmountRule {
 
 ### 테스트로 증명하기
 
-공격을 재현하는 테스트가 통과하면 "막힌다"가 증명됩니다. 서버는 `tests/`, 체인은 `contracts/test/` 에 둡니다. 서버 규칙 테스트는 `tests/purchase.test.ts` 처럼 결제 모드를 `mock` 으로 두고 `runPurchase` 를 불러 기록의 `status`·`failureStage`·알림을 확인합니다.
+공격을 재현하는 테스트가 통과하면 "막힌다"가 증명됩니다. 서버는 `tests/`, 체인은 `contracts/test/` 에 둡니다. 서버 규칙 테스트는 `tests/purchase.test.ts` 처럼 `runPurchase` 를 불러 기록의 `status`·`failureStage`·알림을 확인합니다. 결제는 테스트용 로컬 체인에 진짜로 나갑니다.
 
 ## 테스트가 확인하는 것
 
 | 명령 | 진짜로 도는 것 | 가짜로 바꾼 것 | 확인하지 않는 것 |
 | --- | --- | --- | --- |
-| `npm test` | 선택·점수 계산, 감사 규칙 자리, 기록(임시 MongoDB), 짝짓기 규칙 | 결제(`mock`), Qwen 응답, 세 벤치마크 사이트 응답, 벤치마크 숫자(`tests/fixtures/`) | 체인에서 막히는지, Qwen 이 문장을 맞게 읽는지, 실제 사이트 값 |
+| `npm test` | 선택·점수 계산, 감사 규칙 자리와 알림, 기록(임시 MongoDB), 짝짓기 규칙, **로컬 체인 결제와 판매창구 확인** | Qwen 응답, 세 벤치마크 사이트 응답, 벤치마크 숫자(`tests/fixtures/`) | Qwen 이 문장을 맞게 읽는지, 실제 사이트 값 |
 | `forge test` | 컨트랙트(발급, `pay`, 규칙이 `pay` 를 막는지) | 없음(메모리 안의 체인) | 서버와 이어진 흐름 |
 | `npm run chain` + `npm run dev` 후 요청 | 전체 흐름: 서버 규칙, 로컬 체인 결제·체인 규칙, 판매창구 확인 | 모델 응답(Mock 문장) | Base Sepolia 결제 |
 | 위 + Ollama 켜고 우선순위 비워 요청 | Qwen 의 우선순위 판단까지 | 모델 응답(Mock 문장) | Base Sepolia 결제 |
@@ -206,7 +206,8 @@ contract AegisToken is ERC20, Ownable, PaymentRules, MaxAmountRule {
 
 | 이름 | 기본값 | 뜻 |
 | --- | --- | --- |
-| `AEGIS_PAYMENT_MODE` | `local` | `local`: 로컬 체인 · `live`: Base Sepolia 전송을 요청 · `mock`: 체인 없이 흐름만(자동 테스트용) |
+| `AEGIS_PAYMENT_MODE` | `local` | `local`: 로컬 체인 · `live`: Base Sepolia 전송을 요청 |
+| `AEGIS_LOCAL_RPC_URL` | `http://127.0.0.1:8545` | 로컬 체인 주소. 이 컴퓨터 주소만 받음. 자동 테스트는 `8546` 을 씀 |
 | `AEGIS_REAL_PAYMENT_APPROVED` | `no` | `yes`여야 live가 실제로 켜짐 |
 | `AEGIS_TOKEN_ADDRESS` | `0xE208…142b` | live 에서 쓰는 Base Sepolia AEGIS 토큰(소수점 6자리). 지금 값은 `pay` 가 없는 이전 토큰 |
 | `AEGIS_CHAIN_ID` | `84532` | Base Sepolia |
@@ -225,7 +226,8 @@ contract AegisToken is ERC20, Ownable, PaymentRules, MaxAmountRule {
 | --- | --- | --- |
 | `local` (기본) | 이 컴퓨터의 anvil | `npm run chain` 을 켜 둠 |
 | `live` | Base Sepolia | 아래 두 변수, 개인키, `pay` 가 있는 토큰 주소 |
-| `mock` | 없음(흐름만) | 자동 테스트(`npm test`)가 씀 |
+
+자동 테스트(`npm test`)도 `local` 로 결제합니다. 시작할 때 테스트 전용 로컬 체인(8546)을 스스로 켜고 끝나면 끄므로, 개발용 `npm run chain`(8545)을 켜 둔 채로 돌려도 됩니다. 같은 구매자 지갑을 쓰므로 테스트 파일은 하나씩 돕니다.
 
 `local` 은 감사 규칙이 담긴 컨트랙트를 그대로 올려 쓰므로, 체인에서 막히는 것까지 화면에서 확인할 수 있습니다. `npm run chain` 을 끄면 체인과 그 위의 잔액도 사라지고, 다시 켜면 빈 체인에 같은 주소로 새로 배포합니다. 계정은 anvil 의 공개 테스트 계정(0번 운영자, 1번 구매자)이라 실제 자산이 없습니다.
 
