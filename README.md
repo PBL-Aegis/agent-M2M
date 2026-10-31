@@ -186,8 +186,9 @@ contract AegisToken is ERC20, Ownable, PaymentRules, MaxAmountRule {
 
 ### 등록된 규칙
 
-- **replay** (재전송·연타, `src/lib/rules/replay.ts`, `contracts/src/rules/ReplayRule.sol`): 같은 요청 번호는 한 번만 결제합니다. 다시 오면 요청 직후 기록 없이 409(`rule: "replay"`), 체인에서는 `RequestIdReused` 로 revert.
-  한 사용자(체인에서는 구매자 지갑)가 `AUDIT_REPLAY_WINDOW_SECONDS`(기본 60)초 안에 `AUDIT_REPLAY_MAX_PAYMENTS`(기본 5)건을 넘겨 결제하면 송금 전에 막혀 `FAILED`·`before-send`(`rule: "replay-rate"`), 체인에서는 `TooManyPayments` 로 revert. 체인 값은 운영자가 `setReplayLimit` 로 바꿉니다.
+- **replay** (재시도·재전송, `src/lib/rules/replay.ts`, `contracts/src/rules/ReplayRule.sol`): 요청 번호당 결제는 1번. 같은 번호가 다시 오면 처리 중·송금 후 실패는 기록 없이 409(`rule: "replay"`), 성공은 이전 기록을 그대로 응답, 송금 전 실패는 다시 처리합니다. 서버는 `AUDIT_REQUEST_ID_TTL_SECONDS`(기본 86400)초 뒤 번호를 잊고, 체인은 영구히 기억해 `RequestIdReused` 로 revert 합니다. 기록 없이 끝난 요청의 번호는 `AUDIT_REQUEST_ID_LEASE_SECONDS`(기본 120)초 뒤 다시 받습니다.
+- **repeat-prompt** (같은 문장 반복, `src/lib/rules/replay.ts`): 한 사용자가 요청 번호만 바꿔 같은 문장을 `AUDIT_REPEAT_WINDOW_SECONDS`(기본 60)초 안에 `AUDIT_REPEAT_COUNT`(기본 3)번 보내면 멈추고 사용자 확인(409). 사용자가 없는 요청은 한 사용자로 묶어 셉니다.
+- **결제 횟수** (`ReplayRule.sol`, 체인만): 지갑별 `rateWindow`(기본 60)초에 `rateLimit`(기본 5)건을 넘으면 `TooManyPayments` 로 revert 되어 `FAILED`·`before-send` 로 남습니다. 값은 운영자가 `setRateLimit` 로 바꿉니다.
 
 ### 테스트로 증명하기
 
@@ -340,6 +341,8 @@ node scripts/capture-benchmark.mjs          # data/catalog.json · benchmark.jso
 | --- | --- |
 | `purchases` | 구매 기록(요청, 결정 근거, 결제, 결과, 상태) |
 | `alerts` | 이상 거래 알림(차단·경고) |
+| `replay_request_ids` | 쓴 요청 번호(보관 기간 뒤 자동 삭제) |
+| `replay_prompts` | 사용자별 같은 문장 횟수(창이 지나면 자동 삭제) |
 | `snapshots` | 1시간마다 받아 온 벤치마크 숫자 |
 
 MongoDB 를 켜는 방법은 설치 방식에 따라 다릅니다.

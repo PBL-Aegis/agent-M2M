@@ -76,7 +76,7 @@ contract ReplayRuleTest is Test {
     }
 
     function test_burstOverLimitReverts() public {
-        uint256 max = token.maxPaymentsPerWindow();
+        uint256 max = token.rateLimit();
         for (uint256 i = 0; i < max; i++) _pay(buyer, _id("burst", i));
         vm.prank(buyer);
         vm.expectRevert(abi.encodeWithSelector(ReplayRule.TooManyPayments.selector, buyer, max + 1));
@@ -85,33 +85,33 @@ contract ReplayRuleTest is Test {
     }
 
     function test_windowResetsAfterWindowSeconds() public {
-        uint256 max = token.maxPaymentsPerWindow();
+        uint256 max = token.rateLimit();
         uint256 start = vm.getBlockTimestamp();
         for (uint256 i = 0; i < max; i++) _pay(buyer, _id("first", i));
-        vm.warp(start + token.windowSeconds() - 1);
+        vm.warp(start + token.rateWindow() - 1);
         vm.prank(buyer);
         vm.expectRevert(abi.encodeWithSelector(ReplayRule.TooManyPayments.selector, buyer, max + 1));
         token.pay(seller, AMOUNT, _id("first", max));
 
-        vm.warp(start + token.windowSeconds());
+        vm.warp(start + token.rateWindow());
         _pay(buyer, _id("second", 0));
         assertEq(token.paymentsInWindow(buyer), 1);
     }
 
     function test_limitIsPerWallet() public {
-        uint256 max = token.maxPaymentsPerWindow();
+        uint256 max = token.rateLimit();
         for (uint256 i = 0; i < max; i++) _pay(buyer, _id("buyer", i));
         _pay(other, _id("other", 0));
         assertEq(token.paymentsInWindow(other), 1);
     }
 
     function test_ownerChangesLimit() public {
-        uint256 max = token.maxPaymentsPerWindow() + 2;
-        uint256 window = token.windowSeconds() * 2;
+        uint256 max = token.rateLimit() + 2;
+        uint256 window = token.rateWindow() * 2;
         vm.prank(owner);
-        token.setReplayLimit(max, window);
-        assertEq(token.maxPaymentsPerWindow(), max);
-        assertEq(token.windowSeconds(), window);
+        token.setRateLimit(max, window);
+        assertEq(token.rateLimit(), max);
+        assertEq(token.rateWindow(), window);
         for (uint256 i = 0; i < max; i++) _pay(buyer, _id("raised", i));
         vm.prank(buyer);
         vm.expectRevert(abi.encodeWithSelector(ReplayRule.TooManyPayments.selector, buyer, max + 1));
@@ -121,12 +121,12 @@ contract ReplayRuleTest is Test {
     function test_othersCannotChangeLimit() public {
         vm.prank(buyer);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, buyer));
-        token.setReplayLimit(100, 1);
+        token.setRateLimit(100, 1);
     }
 
     function test_zeroLimitRejected() public {
         vm.prank(owner);
-        vm.expectRevert(ReplayRule.InvalidReplayLimit.selector);
-        token.setReplayLimit(0, 60);
+        vm.expectRevert(ReplayRule.InvalidRateLimit.selector);
+        token.setRateLimit(0, 60);
     }
 }
