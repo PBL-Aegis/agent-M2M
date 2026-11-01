@@ -146,7 +146,7 @@ export interface ScoredCandidate {
   arenaScore?: number;
   priceScore: number;
   timeScore: number;
-  /** 성능 점수. 새 기록은 ECI 를 후보 중 최저 0점·최고 100점으로 편 값이다. 가중치의 "성능" 칸에 들어간다. */
+  /** 성능 점수. 새 기록은 ECI 를 판매 최소 기준(eciFloor) 0점·후보 중 최고 100점으로 편 값이다. 가중치의 "성능" 칸에 들어간다. */
   intelligenceScore: number;
   totalScore: number;
   rank: number;
@@ -182,6 +182,8 @@ export interface Decision {
     maxCompletionMs?: number;
     minEci?: number;
     maxEci?: number;
+    /** 성능 점수의 0점 기준(ECI). 고정 기준으로 바꾼 뒤의 기록에만 있다. 없으면 minEci 가 0점이다. */
+    eciFloor?: number;
     /** 옛 기록에만 있다. */
     maxIntelligenceIndex?: number;
     maxArenaRating?: number;

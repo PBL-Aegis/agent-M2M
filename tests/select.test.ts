@@ -4,6 +4,8 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { loadSnapshot } from "../src/lib/benchmark";
+import { MIN_ECI } from "../src/lib/benchmark-sources.mjs";
 import { amountUnits, decide, eciScore, logHigherIsBetterScore, logLowerIsBetterScore, SelectionError } from "../src/lib/select";
 
 /** 400 입력 토큰이 나오도록 1600 바이트짜리 ASCII 요청을 만든다(4바이트 = 1토큰 어림). */
@@ -57,11 +59,28 @@ describe("decide", () => {
 });
 
 describe("Epoch ECI 성능 점수", () => {
-  it("ECI 는 후보 중 최저 0점·최고 100점으로 편다. 후보가 하나면 100점이다", () => {
+  it("ECI 는 기준값 0점·후보 중 최고 100점으로 편다. 최고가 기준 이하면 100점, 기준 아래는 0점이다", () => {
     expect(eciScore(160, 140, 160)).toBe(100);
     expect(eciScore(140, 140, 160)).toBe(0);
     expect(eciScore(150, 140, 160)).toBe(50);
     expect(eciScore(150, 150, 150)).toBe(100);
+    expect(eciScore(130, 140, 160)).toBe(0);
+  });
+
+  it("성능 0점은 후보 중 최저가 아니라 판매 최소 기준(MIN_ECI)이다", () => {
+    const source = loadSnapshot();
+    const snapshot = structuredClone(source.snapshot);
+    const mini = snapshot.models.find((model) => model.key === "openai/test-mini")!;
+    const maxEci = Math.max(...snapshot.models.map((model) => Number(model.eci)));
+    const raisedEci = (MIN_ECI + maxEci) / 2;
+    mini.eci = String(raisedEci);
+    const decision = decide(
+      { prompt: PROMPT_400, budgetUnits: 50_000, priority: "intelligence" },
+      { snapshot, hash: source.hash },
+    );
+    const scored = decision.candidates.find((item) => item.key === "openai/test-mini")!;
+    expect(scored.intelligenceScore).toBe(50);
+    expect(decision.references.eciFloor).toBe(MIN_ECI);
   });
 
   it("성능 점수에 ECI·신뢰구간·속도를 잰 AA 항목을 남긴다", () => {

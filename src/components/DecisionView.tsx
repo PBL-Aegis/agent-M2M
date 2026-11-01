@@ -124,7 +124,7 @@ export function CandidateTables({ record }: { record: PurchaseRecord }) {
         <>
           <h2>점수 근거 · 세 출처</h2>
           <p className="muted">
-            성능 Epoch ECI · 가격 OpenRouter 단가 · 속도 Artificial Analysis 출력 속도. 후보 중 최저 0점, 최고 100점(가격·속도는 로그).
+            성능 Epoch ECI · 가격 OpenRouter 단가 · 속도 Artificial Analysis 출력 속도. 가격·속도는 후보 중 최저 0점(로그), 성능은 ECI {decision.references.eciFloor ?? "후보 최저"} 0점, 모두 후보 중 최고 100점.
           </p>
           <div className="table-wrap">
             <table>
