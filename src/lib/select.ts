@@ -8,18 +8,21 @@
  *   4) 총점과 고정된 동점 규칙으로 1등을 정한다
  * 필터를 점수보다 먼저 거는 이유는, 못 쓸 후보가 점수의 기준선을 흔들지 않게 하기 위해서다.
  *
- * 세 점수는 각각 한 출처에서 오고, 모두 후보 중 가장 나쁜 값 0점·가장 좋은 값 100점으로 편다.
+ * 세 점수는 각각 한 출처에서 온다. 가격·속도는 후보 중 가장 나쁜 값 0점·가장 좋은 값 100점, 성능은 판매 최소
+ * 기준(MIN_ECI) 0점·후보 중 가장 좋은 값 100점으로 편다.
  *   가격 점수 = (log 최고 금액 − log 내 금액) ÷ (log 최고 − log 최저) × 100   (OpenRouter 판매 단가)
  *   속도 점수 = (log 내 출력 속도 − log 최저) ÷ (log 최고 − log 최저) × 100   (AA 출력 속도, 토큰/초)
- *   성능 점수 = (내 ECI − 최저 ECI) ÷ (최고 − 최저) × 100                    (Epoch ECI)
+ *   성능 점수 = (내 ECI − MIN_ECI) ÷ (최고 ECI − MIN_ECI) × 100              (Epoch ECI)
  * 가격과 속도는 후보끼리 몇 배~수십 배 차이 나서 로그로 편다. 그러면 2배 싼 것은 어느 가격대에서든 같은
  * 만큼 점수가 오르고, 아주 싼 모델 하나가 나머지를 0점 가까이로 누르거나(비율 방식) 아주 비싼 모델 하나에
  * 나머지가 끌려가는(직선 방식) 일이 줄어든다.
  * ECI 는 여러 벤치마크를 난이도까지 고려해 합친 지수라 0 이 "능력 없음"이 아니고 차이 자체가 의미를
- * 가지므로 그대로 편다. 후보가 하나뿐이거나 값이 모두 같으면 100점이다.
+ * 가지므로 그대로 편다. 0점을 후보 중 꼴찌가 아니라 고정 기준에 두는 이유는, 후보가 바뀔 때마다 0점 모델이
+ * 바뀌고 그에 따라 나머지 점수가 출렁이지 않게 하기 위해서다. 후보가 하나뿐이거나 값이 모두 같으면 100점이다.
  */
 
 import { loadCatalog, loadSnapshot, pairEntries } from "./benchmark";
+import { MIN_ECI } from "./benchmark-sources.mjs";
 import {
   PRIORITY_WEIGHTS,
   type BenchmarkSnapshot,
@@ -79,9 +82,9 @@ export function estimateInputTokens(prompt: string): number {
   return Math.max(1, Math.ceil(bytes / 4));
 }
 
-/** ECI 를 후보 중 최저 0점·최고 100점으로 편다. */
-export function eciScore(eci: number, minEci: number, maxEci: number): number {
-  return maxEci === minEci ? 100 : ((eci - minEci) / (maxEci - minEci)) * 100;
+/** ECI 를 floor 0점·후보 중 최고 100점으로 편다. 다시 받은 ECI 가 floor 아래로 내려가도 0점 밑으로 가지 않는다. */
+export function eciScore(eci: number, floor: number, maxEci: number): number {
+  return maxEci <= floor ? 100 : Math.max(0, ((eci - floor) / (maxEci - floor)) * 100);
 }
 
 /** 작을수록 좋은 값(금액)을 로그로 바꿔 후보 중 최대 0점·최소 100점으로 편다. */
@@ -189,7 +192,7 @@ export function decide(
     const timeScore = round(
       logHigherIsBetterScore(candidate.outputTokensPerSecond, minOutputTokensPerSecond, maxOutputTokensPerSecond),
     );
-    const intelligenceScore = round(eciScore(candidate.eci, minEci, maxEci));
+    const intelligenceScore = round(eciScore(candidate.eci, MIN_ECI, maxEci));
     const totalScore = round(
       (priceScore * weights.price +
         timeScore * weights.time +
@@ -247,12 +250,13 @@ export function decide(
       maxOutputTokensPerSecond,
       minEci,
       maxEci,
+      eciFloor: MIN_ECI,
     },
     performanceSources: {
       performance: "Epoch Capabilities Index (95% 신뢰구간)",
       price: "OpenRouter 판매 단가",
       speed: "Artificial Analysis 출력 속도(토큰/초), 최근 72시간 중앙값의 생각 단계별 평균",
-      combine: "가격·속도는 로그로, 성능(ECI)은 그대로 후보 중 가장 나쁜 값 0점·가장 좋은 값 100점으로 폄",
+      combine: `가격·속도는 로그로 후보 중 가장 나쁜 값 0점·가장 좋은 값 100점, 성능(ECI)은 그대로 ECI ${MIN_ECI} 0점·후보 중 최고 100점으로 폄`,
     },
     candidates: scored,
     rejected,
