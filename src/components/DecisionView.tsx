@@ -63,12 +63,6 @@ export function PurchaseSummary({ record }: { record: PurchaseRecord }) {
               <code className="hash">{payment?.to ?? "-"}</code>
             </td>
           </tr>
-          <tr>
-            <th>벤치마크 스냅샷</th>
-            <td>
-              <code className="hash">{decision.snapshotHash}</code>
-            </td>
-          </tr>
         </tbody>
       </table>
 
@@ -130,10 +124,7 @@ export function CandidateTables({ record }: { record: PurchaseRecord }) {
         <>
           <h2>점수 근거 · 세 출처</h2>
           <p className="muted">
-            성능은 Epoch Capabilities Index(여러 벤치마크를 난이도까지 고려해 합친 지수), 가격은 OpenRouter 판매 단가,
-            속도는 Artificial Analysis가 잰 출력 속도(1초에 내보내는 토큰 수)를 생각 단계별로 평균낸 값입니다. 세 점수 모두
-            후보 중 가장 나쁜 값을 0점, 가장 좋은 값을 100점으로 폈고, 가격과 속도는 몇 배 차이인지가 반영되도록 로그로
-            폈습니다.
+            성능 Epoch ECI · 가격 OpenRouter 단가 · 속도 Artificial Analysis 출력 속도. 후보 중 최저 0점, 최고 100점(가격·속도는 로그).
           </p>
           <div className="table-wrap">
             <table>

@@ -42,7 +42,6 @@ export default async function DashboardPage() {
         <article>
           <span>결제 금액 합계</span>
           <strong>{aegisText(spentUnits)}</strong>
-          <small>정산 완료 거래 기준</small>
         </article>
         <article>
           <span>이상 거래</span>
@@ -55,10 +54,7 @@ export default async function DashboardPage() {
       <section className="auditLayout">
         <article className="panel">
           <div className="sectionHead">
-            <div>
-              <p className="eyebrow">RECENT TRANSACTIONS</p>
-              <h2>최근 요청·결제 기록</h2>
-            </div>
+            <h2>최근 요청·결제 기록</h2>
             <Link href="/dashboard/purchases">전체 기록 →</Link>
           </div>
           <PurchaseTable records={records.slice(0, RECENT_COUNT)} />
@@ -66,10 +62,7 @@ export default async function DashboardPage() {
 
         <aside className="panel">
           <div className="sectionHead">
-            <div>
-              <p className="eyebrow">ANOMALY ALERTS</p>
-              <h2>이상 거래 감지</h2>
-            </div>
+            <h2>이상 거래 감지</h2>
             <Link href="/dashboard/alerts">전체 →</Link>
           </div>
           <AlertList alerts={alerts} linked={linked} compact />

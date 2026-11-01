@@ -76,61 +76,51 @@ export function ChatPanel() {
 
   return (
     <div className="chat">
-      {turns.length === 0 ? (
-        <div className="chat-empty">
-          <h1>무엇을 물어볼까요?</h1>
-          <p className="muted">
-            보내면 벤치마크 표로 모델을 고르고, 그 모델에 결제한 뒤 결과를 가져옵니다.
-          </p>
-        </div>
-      ) : (
-        <div className="chat-log">
-          {turns.map((turn) => (
-            <div key={turn.id} className="turn">
-              <div className="bubble user">{turn.prompt}</div>
+      <div className="chat-log">
+        {turns.map((turn) => (
+          <div key={turn.id} className="turn">
+            <div className="bubble user">{turn.prompt}</div>
 
-              {turn.record === null && turn.error === null && (
-                <div className="bubble agent muted">모델을 고르고 결제하는 중…</div>
-              )}
+            {turn.record === null && turn.error === null && (
+              <div className="bubble agent muted">모델을 고르고 결제하는 중…</div>
+            )}
 
-              {turn.error !== null && <div className="bubble agent error">{turn.error}</div>}
+            {turn.error !== null && <div className="bubble agent error">{turn.error}</div>}
 
-              {turn.record !== null && turn.record.status === "FAILED" && (
-                <div className="bubble agent error">
-                  결제하지 못했습니다: {turn.record.failureReason}
+            {turn.record !== null && turn.record.status === "FAILED" && (
+              <div className="bubble agent error">
+                결제하지 못했습니다: {turn.record.failureReason}
+              </div>
+            )}
+
+            {turn.record !== null && turn.record.status === "SETTLED" && (
+              <div className="bubble agent">
+                <div className="picked">
+                  <b>{turn.record.decision.winner.displayName}</b> 선택 ·{" "}
+                  {toAegis(turn.record.decision.winner.amountUnits)} AEGIS 결제
                 </div>
-              )}
-
-              {turn.record !== null && turn.record.status === "SETTLED" && (
-                <div className="bubble agent">
-                  <div className="picked">
-                    <b>{turn.record.decision.winner.displayName}</b> 선택 ·{" "}
-                    {toAegis(turn.record.decision.winner.amountUnits)} AEGIS 결제
-                    {turn.record.payment !== null && turn.record.payment.mode !== "live" && ` (${turn.record.payment.mode})`}
+                <pre className="result">{turn.record.resultText}</pre>
+                <button
+                  type="button"
+                  className="link"
+                  onClick={() => setOpen(open === turn.id ? null : turn.id)}
+                >
+                  {open === turn.id ? "고른 근거 접기" : "고른 근거 보기"}
+                </button>
+                {open === turn.id && (
+                  <div className="evidence">
+                    <PurchaseSummary record={turn.record} />
+                    <CandidateTables record={turn.record} />
+                    <p className="muted">
+                      <Link href={`/dashboard/${turn.record.id}`}>기록 상세 보기</Link>
+                    </p>
                   </div>
-                  <pre className="result">{turn.record.resultText}</pre>
-                  <button
-                    type="button"
-                    className="link"
-                    onClick={() => setOpen(open === turn.id ? null : turn.id)}
-                  >
-                    {open === turn.id ? "고른 근거 접기" : "고른 근거 보기"}
-                  </button>
-                  {open === turn.id && (
-                    <div className="evidence">
-                      <PurchaseSummary record={turn.record} />
-                      <CandidateTables record={turn.record} />
-                      <p className="muted">
-                        <Link href={`/dashboard/${turn.record.id}`}>기록 상세 보기</Link>
-                      </p>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
 
       <form className="composer" onSubmit={onSubmit}>
         <div className="composer-row">
