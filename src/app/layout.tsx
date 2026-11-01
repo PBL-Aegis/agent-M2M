@@ -21,10 +21,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       <body>
         <header className="site">
           <div className="inner">
-            <span className="brand">
-              <span className="brandMark">M2M</span>
-              agent-M2M
-            </span>
+            <span className="brand">agent-M2M</span>
             <div className="right">
               <SiteNav />
               <span

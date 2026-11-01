@@ -19,11 +19,10 @@ export function PurchaseTable({ records }: { records: PurchaseRecord[] }) {
       <table>
         <thead>
           <tr>
-            <th>요청·Purchase ID</th>
+            <th>요청</th>
             <th>처리 상태</th>
             <th>결제 금액</th>
             <th>선택된 모델</th>
-            <th>결제 모드</th>
           </tr>
         </thead>
         <tbody>
@@ -47,7 +46,6 @@ export function PurchaseTable({ records }: { records: PurchaseRecord[] }) {
                 {record.decision.winner.displayName}
                 <small>{PRIORITY_LABEL[record.decision.priority]}</small>
               </td>
-              <td>{record.payment?.mode ?? "-"}</td>
             </tr>
           ))}
         </tbody>

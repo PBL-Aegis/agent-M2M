@@ -13,8 +13,7 @@ export default async function AlertsPage() {
   return (
     <>
       <div className="pageHead">
-        <p className="eyebrow">이상 거래</p>
-        <h1>감사 규칙이 막거나 경고한 거래</h1>
+        <h1>이상 거래</h1>
       </div>
       <AlertList alerts={alerts} linked={linked} />
     </>
